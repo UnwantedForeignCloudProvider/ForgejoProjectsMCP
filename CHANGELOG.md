@@ -12,6 +12,18 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 ### Added
 - (nothing yet)
 
+## [0.1.0rc1] - 2026-09-04
+
+### Added
+- Initial prerelease of the MCP server for managing Forgejo repository projects,
+  columns, cards/issues, and milestones through Forgejo's internal web routes.
+- Bulk and composed readers with state and resource filters, pagination, request
+  throttling, and explicit partial-error reporting.
+- A CLI exposing every MCP tool as a subcommand, automatic `.env` loading,
+  cached session authentication, configurable logging, and concurrency controls.
+- User, contributor, architecture, automation-reference, and versioned MkDocs
+  documentation, plus tag-driven PyPI and GitHub release workflows.
+
 <!--
 When cutting a release, move the Unreleased items into a new section titled
 exactly `## [X.Y.Z] - YYYY-MM-DD` (the release workflow extracts the notes for a
