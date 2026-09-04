@@ -23,11 +23,11 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0        # full history + tags for dynamic versioning
       - name: Install uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v10.0.1
 
       - name: Verify version matches the tag
         run: |
@@ -44,7 +44,7 @@ jobs:
         run: uv build
 
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -60,7 +60,7 @@ jobs:
       id-token: write        # required for PyPI trusted publishing (OIDC)
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
@@ -77,9 +77,9 @@ jobs:
     permissions:
       contents: write        # required to create a GitHub Release
     steps:
-      - uses: actions/checkout@v5      # for CHANGELOG.md at the tagged commit
+      - uses: actions/checkout@v7      # for CHANGELOG.md at the tagged commit
       - name: Download build artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: dist
           path: dist/
