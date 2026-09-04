@@ -5,6 +5,7 @@ most likely to break on a Forgejo upgrade) and that responses are parsed right.
 """
 
 import asyncio
+import re
 
 import pytest
 from conftest import FakeResponse, make_client
@@ -360,3 +361,219 @@ def test_close_is_idempotent_and_never_raises():
     run(c.close())  # second call is a no-op
     assert c._ctx is None
     assert c._pw is None
+
+
+# --------------------------------------------------------------- bulk / reading
+def _issue_html(n, title="T", state="open"):
+    octicon = "octicon-issue-closed" if state == "closed" else "octicon-issue-opened"
+    return (
+        f'<meta property="og:title" content="{title}">'
+        f'<span class="index">#{n}</span>'
+        f'<div data-issue-id="{1000 + n}"></div>'
+        f'<div class="issue-state-label"><svg class="svg {octicon}"></svg></div>'
+        f'<div id="issue-{n}-raw" class="raw-content">body {n}</div>'
+    )
+
+
+_READ_BOARD = """
+<div class="project-column" data-id="5"><span class="project-column-title-label">To Do</span>
+  <div class="ui cards" id="board_5">
+    <div class="issue-card" data-issue="1042"><a href="/o/r/issues/42">C1</a></div>
+  </div></div>
+<div class="project-column" data-id="6"><span class="project-column-title-label">Done</span>
+  <div class="ui cards" id="board_6">
+    <div class="issue-card" data-issue="1043"><a href="/o/r/issues/43">C2</a></div>
+  </div></div>
+"""
+
+
+def _read_handler(method, path, kw):
+    if path == f"{REPO}/projects/1":
+        return FakeResponse(status=200, text=_READ_BOARD)
+    if path == f"{REPO}/issues":
+        return FakeResponse(status=200,
+                            text='<a href="/o/r/issues/42">a</a><a href="/o/r/issues/43">b</a>')
+    if path == f"{REPO}/milestones":
+        return FakeResponse(status=200, text='<a href="/o/r/milestone/7">Sprint 7</a>')
+    m = re.fullmatch(rf"{REPO}/issues/(\d+)", path)
+    if m:
+        n = int(m.group(1))
+        return FakeResponse(status=200, text=_issue_html(n, f"Card {n}"))
+    return FakeResponse(status=200)
+
+
+def test_read_issue_full():
+    c = make_client(_read_handler)
+    got = run(c.read_issue("o", "r", 42))
+    assert got["number"] == 42
+    assert got["title"] == "Card 42"
+    assert got["body"] == "body 42"
+
+
+def test_bulk_read_issues_returns_all_and_inlines_errors():
+    def handler(method, path, kw):
+        if path == f"{REPO}/issues/99":
+            raise PlaywrightError("boom")
+        return _read_handler(method, path, kw)
+
+    c = make_client(handler)
+    got = run(c.bulk_read_issues("o", "r", [42, 99, 43]))
+    assert [g["number"] for g in got] == [42, 99, 43]
+    assert got[0]["title"] == "Card 42"
+    assert "error" in got[1]              # failed one is inlined, not fatal
+    assert got[2]["title"] == "Card 43"
+
+
+def test_read_column_content():
+    c = make_client(_read_handler)
+    got = run(c.read_column_content("o", "r", 1, 5))
+    assert got["column"] == {"id": 5, "title": "To Do"}
+    assert got["total"] == 1
+    assert got["returned"] == 1
+    assert got["error_count"] == 0
+    assert got["truncated"] is False
+    assert got["issues"][0]["number"] == 42
+
+
+def test_read_column_content_missing_column():
+    c = make_client(_read_handler)
+    with pytest.raises(ForgejoError) as exc:
+        run(c.read_column_content("o", "r", 1, 999))
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+
+
+def test_read_project_content():
+    c = make_client(_read_handler)
+    got = run(c.read_project_content("o", "r", 1))
+    assert got["total"] == 2
+    assert got["returned"] == 2
+    assert got["error_count"] == 0
+    cols = {c["title"]: c for c in got["columns"]}
+    assert cols["To Do"]["cards"][0]["number"] == 42
+    assert cols["Done"]["cards"][0]["body"] == "body 43"
+
+
+def test_read_project_limit_offset_paginates():
+    c = make_client(_read_handler)
+    got = run(c.read_project_content("o", "r", 1, limit=1))
+    assert got["total"] == 2
+    assert got["returned"] == 1
+    assert got["truncated"] is True
+    cols = {c["title"]: c for c in got["columns"]}
+    assert [x["number"] for x in cols["To Do"]["cards"]] == [42]
+    assert cols["Done"]["cards"] == []
+
+
+def test_read_milestone_content():
+    c = make_client(_read_handler)
+    got = run(c.read_milestone_content("o", "r", 7))
+    assert got["milestone"] == {"id": 7, "title": "Sprint 7"}
+    assert {i["number"] for i in got["issues"]} == {42, 43}
+
+
+def test_read_milestone_not_found():
+    c = make_client(_read_handler)   # milestones page only lists id 7
+    with pytest.raises(ForgejoError) as exc:
+        run(c.read_milestone_content("o", "r", 999))
+    assert exc.value.code == "MILESTONE_NOT_FOUND"
+    assert exc.value.status == 404
+
+
+def test_invalid_state_is_rejected():
+    c = make_client(_read_handler)
+    for call in (
+        lambda: c.list_projects("o", "r", "bogus"),
+        lambda: c.read_project_content("o", "r", 1, state="nope"),
+        lambda: c.bulk_read_issues("o", "r", [1], "weird"),
+    ):
+        with pytest.raises(ForgejoError) as exc:
+            run(call())
+        assert exc.value.code == "INVALID_STATE"
+        assert exc.value.status == 400
+
+
+def test_bulk_read_issues_state_filter():
+    def handler(method, path, kw):
+        m = re.fullmatch(rf"{REPO}/issues/(\d+)", path)
+        if m:
+            n = int(m.group(1))
+            st = "closed" if n == 43 else "open"
+            return FakeResponse(status=200, text=_issue_html(n, f"C{n}", st))
+        return FakeResponse(status=200)
+
+    c = make_client(handler)
+    assert [i["number"] for i in run(c.bulk_read_issues("o", "r", [42, 43], "open"))] == [42]
+    assert [i["number"] for i in run(c.bulk_read_issues("o", "r", [42, 43], "closed"))] == [43]
+
+
+def test_read_project_no_filter_skips_issue_query():
+    c = make_client(_read_handler)
+    got = run(c.read_project_content("o", "r", 1))
+    assert got["returned"] == 2
+    assert find_call(c, "GET", f"{REPO}/issues") is None   # no server-side filter needed
+
+
+def test_read_project_milestone_filter():
+    def handler(method, path, kw):
+        if path == f"{REPO}/projects/1":
+            return FakeResponse(status=200, text=_READ_BOARD)
+        if path == f"{REPO}/issues":
+            params = kw.get("params") or {}
+            body = '<a href="/o/r/issues/42">x</a>'
+            if params.get("milestone") != "7":
+                body += '<a href="/o/r/issues/43">y</a>'
+            return FakeResponse(status=200, text=body)
+        m = re.fullmatch(rf"{REPO}/issues/(\d+)", path)
+        if m:
+            n = int(m.group(1))
+            return FakeResponse(status=200, text=_issue_html(n, f"C{n}"))
+        return FakeResponse(status=200)
+
+    c = make_client(handler)
+    got = run(c.read_project_content("o", "r", 1, milestone=7))
+    call = find_call(c, "GET", f"{REPO}/issues")
+    assert call["params"]["project"] == "1"       # project is fixed by the tool
+    assert call["params"]["milestone"] == "7"
+    assert got["returned"] == 1
+    cols = {col["title"]: col for col in got["columns"]}
+    assert [x["number"] for x in cols["To Do"]["cards"]] == [42]
+    assert cols["Done"]["cards"] == []            # card 43 filtered out
+
+
+def test_read_milestone_passes_project_and_state():
+    c = make_client(_read_handler)
+    run(c.read_milestone_content("o", "r", 7, state="open", project=5))
+    call = find_call(c, "GET", f"{REPO}/issues")
+    assert call["params"]["milestone"] == "7"
+    assert call["params"]["project"] == "5"
+    assert call["params"]["state"] == "open"
+
+
+def test_bulk_move_cards_groups_by_column_and_builds_payloads():
+    moves = [
+        {"issue_number": 42, "column_id": 5},
+        {"issue_number": 43, "column_id": 5},
+        {"issue_number": 44, "column_id": 6},
+    ]
+    c = make_client(_read_handler)
+    out = run(c.bulk_move_cards("o", "r", 1, moves))
+    assert out["moved_count"] == 3
+    col5 = find_call(c, "POST", f"{REPO}/projects/1/5/move")
+    col6 = find_call(c, "POST", f"{REPO}/projects/1/6/move")
+    assert col5["data"] == {"issues": [
+        {"issueID": 1042, "sorting": 0},
+        {"issueID": 1043, "sorting": 1},
+    ]}
+    assert col6["data"] == {"issues": [{"issueID": 1044, "sorting": 0}]}
+
+
+def test_throttle_advances_schedule():
+    c = make_client(lambda m, p, kw: FakeResponse(status=200))
+
+    async def go():
+        before = c._next_request
+        await c._throttle()
+        await c._throttle()
+        return c._next_request > before
+
+    assert run(go()) is True

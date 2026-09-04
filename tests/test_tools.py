@@ -9,6 +9,8 @@ import json
 
 import pytest
 
+from mcp.server.mcpserver.exceptions import ToolError
+
 from forgejo_projects_mcp import server
 from forgejo_projects_mcp.client import AuthError, ForgejoError
 
@@ -61,58 +63,46 @@ def test_passthrough_tool_returns_client_dict(monkeypatch):
     assert out["column"]["id"] == 5
 
 
-def test_error_is_surfaced_not_raised(monkeypatch):
+def test_error_raises_tool_error_with_code(monkeypatch):
+    # A 404 is surfaced as a raised ToolError (MCP isError:true), not a value.
     async def boom(*a, **k):
         raise ForgejoError("boom", status=404, code="HTTP_404")
 
     patch(monkeypatch, "create_project", boom)
-    out = result_json(call("create_project", owner="o", repo="r", title="x"))
-    assert out["error"]["category"] == "client_error"
-    assert out["error"]["code"] == "NOT_FOUND"
-    assert out["error"]["message"] == "boom"
+    with pytest.raises(ToolError) as exc:
+        call("create_project", owner="o", repo="r", title="x")
+    assert "[NOT_FOUND]" in str(exc.value)
 
 
-def test_network_error_classified_external(monkeypatch):
+def test_specific_not_found_code_is_preserved(monkeypatch):
     async def boom(*a, **k):
-        raise ForgejoError("unreachable", code="NETWORK_ERROR")
+        raise ForgejoError("no such milestone", status=404, code="MILESTONE_NOT_FOUND")
 
-    patch(monkeypatch, "list_projects", boom)
-    out = result_json(call("list_projects", owner="o", repo="r"))
-    assert out["error"]["category"] == "external_error"
-    assert out["error"]["retry_after"] == 30
-
-
-def test_server_5xx_classified_server_error(monkeypatch):
-    async def boom(*a, **k):
-        raise ForgejoError("upstream", status=500, code="HTTP_500")
-
-    patch(monkeypatch, "get_project", boom)
-    out = result_json(call("get_project", owner="o", repo="r", project_id=1))
-    assert out["error"]["category"] == "server_error"
+    patch(monkeypatch, "read_milestone_content", boom)
+    with pytest.raises(ToolError) as exc:
+        call("read_milestone", owner="o", repo="r", milestone_id=9)
+    assert "[MILESTONE_NOT_FOUND]" in str(exc.value)
 
 
-def test_auth_error_classified_client(monkeypatch):
+def test_auth_error_raises_with_code(monkeypatch):
     async def boom(*a, **k):
         raise AuthError("no creds", code="MISSING_CONFIG")
 
     patch(monkeypatch, "list_repositories", boom)
-    out = result_json(call("list_repositories"))
-    assert out["error"] == {
-        "category": "client_error",
-        "code": "MISSING_CONFIG",
-        "message": "no creds",
-    }
+    with pytest.raises(ToolError) as exc:
+        call("list_repositories")
+    assert "[MISSING_CONFIG]" in str(exc.value)
 
 
-def test_unexpected_error_is_generic(monkeypatch):
+def test_unexpected_error_is_generic_and_does_not_leak(monkeypatch):
     async def boom(*a, **k):
         raise ValueError("internal detail that must not leak")
 
     patch(monkeypatch, "list_projects", boom)
-    out = result_json(call("list_projects", owner="o", repo="r"))
-    assert out["error"]["category"] == "server_error"
-    assert out["error"]["code"] == "INTERNAL_ERROR"
-    assert "internal detail" not in out["error"]["message"]
+    with pytest.raises(ToolError) as exc:
+        call("list_projects", owner="o", repo="r")
+    assert "[INTERNAL_ERROR]" in str(exc.value)
+    assert "internal detail" not in str(exc.value)
 
 
 def test_move_card_forwards_arguments(monkeypatch):
@@ -133,6 +123,24 @@ def test_missing_required_argument_is_rejected():
     # move_card requires column_id; omitting it must fail validation.
     with pytest.raises(Exception):
         call("move_card", owner="o", repo="r", project_id=1, issue_numbers=[1])
+
+
+def test_bulk_read_issues_tool_returns_summaries(monkeypatch):
+    async def fake(owner, repo, numbers, state="all"):
+        # client returns full content; the tool must strip body/comments
+        return [
+            {"number": 1, "title": "A", "state": "open", "milestone": None,
+             "body": "big body", "comments": [{"author": "x", "body": "c"}]},
+            {"number": 2, "error": "boom"},
+        ]
+
+    patch(monkeypatch, "bulk_read_issues", fake)
+    out = result_json(call("bulk_read_issues", owner="o", repo="r", issue_numbers=[1, 2]))
+    assert out["count"] == 1               # successes only (was ambiguous before)
+    assert out["error_count"] == 1
+    assert out["issues"][0] == {"number": 1, "title": "A", "state": "open", "milestone": None}
+    assert "body" not in out["issues"][0] and "comments" not in out["issues"][0]
+    assert out["errors"] == [{"number": 2, "error": "boom"}]   # failures separated
 
 
 def test_lifespan_closes_client_on_shutdown(monkeypatch):

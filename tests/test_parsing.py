@@ -78,6 +78,45 @@ def test_parse_milestones():
     ]
 
 
+ISSUE_HTML = """
+<meta property="og:title" content="My Card">
+<h1 class="tw-break-anywhere"> My Card <span class="index">#42</span> </h1>
+<div class="ui green label issue-state-label"><svg viewBox="0 0 16 16" class="svg octicon-issue-opened"></svg>Open</div>
+<a href="/o/r/milestone/7">Sprint 7</a>
+<div id="issue-42-raw" class="raw-content">Line one.
+
+Line two.</div>
+<div class="timeline-item comment" id="issuecomment-9">
+  <a class="author text black" href="/alice">alice</a>
+  <div id="issuecomment-9-raw" class="raw-content">A **comment**.</div>
+</div>
+<div class="timeline-item event" id="issuecomment-10">changed the milestone</div>
+"""
+
+
+def test_parse_issue_full_content():
+    got = ForgejoClient._parse_issue(ISSUE_HTML)
+    assert got["number"] == 42
+    assert got["title"] == "My Card"
+    assert got["state"] == "open"
+    assert got["milestone"] == {"id": 7, "title": "Sprint 7"}
+    assert got["body"] == "Line one.\n\nLine two."
+    # only the real comment, not the timeline event
+    assert got["comments"] == [{"author": "alice", "body": "A **comment**."}]
+
+
+def test_parse_issue_closed_state():
+    html = (
+        '<meta property="og:title" content="Done">'
+        '<span class="index">#5</span>'
+        '<div class="ui red label issue-state-label"><svg class="svg octicon-issue-closed"></svg>Closed</div>'
+        '<div id="issue-5-raw" class="raw-content">x</div>'
+    )
+    got = ForgejoClient._parse_issue(html)
+    assert got["state"] == "closed"
+    assert got["comments"] == []
+
+
 def test_error_detail_json():
     r = FakeResponse(
         status=500,

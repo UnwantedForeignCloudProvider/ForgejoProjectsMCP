@@ -1,16 +1,18 @@
-name: Publish to PyPI
+name: Publish
 
-# Prepared for LATER. This is dormant until you push a version tag like `v0.1.0`.
-# Before the first real publish you must:
+# Prepared for LATER. Dormant until you push a version tag like `v0.1.0`.
+# The package version is derived from the tag (uv-dynamic-versioning), so you
+# never edit a version by hand — just tag and push.
+#
+# Before the first real PyPI publish:
 #   1. Create the project on PyPI (name: forgejo-projects-mcp), and
 #   2. Configure a "Trusted Publisher" on PyPI for this repo pointing at:
 #        workflow:    publish.yml
 #        environment: pypi
-#      (PyPI project -> Settings -> Publishing -> Add a new publisher.)
 # With trusted publishing (OIDC) no API token/secret is needed.
 #
-# Prefer testing on TestPyPI first: uncomment the `repository-url` line in the
-# publish step and configure a matching trusted publisher on test.pypi.org.
+# Release a version:
+#   git tag v0.1.0 && git push origin v0.1.0
 
 on:
   push:
@@ -21,19 +23,34 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0        # full history + tags for dynamic versioning
       - name: Install uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
+
+      - name: Verify version matches the tag
+        run: |
+          version="$(uvx uv-dynamic-versioning)"
+          tag="${GITHUB_REF_NAME#v}"
+          echo "computed version: $version | tag: $tag"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::Built version '$version' does not match tag '$tag' \
+          (is HEAD exactly on the tag, with full history fetched?)."
+            exit 1
+          fi
+
       - name: Build sdist and wheel
         run: uv build
+
       - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: dist
           path: dist/
           if-no-files-found: error
 
-  publish:
+  pypi-publish:
     needs: build
     runs-on: ubuntu-latest
     # A GitHub Environment named "pypi" — create it in repo Settings and
@@ -43,13 +60,54 @@ jobs:
       id-token: write        # required for PyPI trusted publishing (OIDC)
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: dist
           path: dist/
-      - name: Publish
+      - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           # For TestPyPI, uncomment:
           # repository-url: https://test.pypi.org/legacy/
           packages-dir: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write        # required to create a GitHub Release
+    steps:
+      - uses: actions/checkout@v5      # for CHANGELOG.md at the tagged commit
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: dist
+          path: dist/
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            $0 ~ "^## \\[" ver "\\]" {flag=1; next}
+            flag && /^## \[/ {exit}
+            flag {print}
+          ' CHANGELOG.md > RELEASE_NOTES.md || true
+          echo "--- release notes ---"; cat RELEASE_NOTES.md || true
+
+      - name: Detect prerelease
+        id: pre
+        run: |
+          if [[ "${GITHUB_REF_NAME}" =~ (a|b|rc)[0-9]*$ ]]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: RELEASE_NOTES.md
+          generate_release_notes: true    # appends auto notes when the file is empty
+          prerelease: ${{ steps.pre.outputs.value }}
+          fail_on_unmatched_files: true

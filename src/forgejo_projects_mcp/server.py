@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from mcp.server.mcpserver import MCPServer
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .client import AuthError, ForgejoClient, ForgejoError
 
@@ -59,37 +60,28 @@ def _classify(exc: Exception) -> dict[str, Any]:
         }
     if isinstance(exc, ForgejoError):
         status = getattr(exc, "status", None)
-        code = getattr(exc, "code", None)
-        if code == "NETWORK_ERROR":
-            return {
-                "category": "external_error",
-                "code": "NETWORK_ERROR",
-                "message": str(exc),
-                "retry_after": 30,
-            }
+        raw = getattr(exc, "code", None)
+        # A meaningful code from the client wins; raw "HTTP_<n>" is generic and
+        # gets prettified to a category label below.
+        specific = raw if raw and not raw.startswith("HTTP_") else None
+        if specific == "NETWORK_ERROR":
+            return {"category": "external_error", "code": "NETWORK_ERROR",
+                    "message": str(exc), "retry_after": 30}
         if status is not None and status >= 500:
-            return {
-                "category": "server_error",
-                "code": code or "UPSTREAM_ERROR",
-                "message": str(exc),
-                "retry_after": 30,
-            }
+            return {"category": "server_error", "code": specific or "UPSTREAM_ERROR",
+                    "message": str(exc), "retry_after": 30}
         if status in (401, 403):
-            return {"category": "client_error", "code": "FORBIDDEN", "message": str(exc)}
+            return {"category": "client_error", "code": specific or "FORBIDDEN",
+                    "message": str(exc)}
         if status == 404:
-            return {"category": "client_error", "code": "NOT_FOUND", "message": str(exc)}
+            return {"category": "client_error", "code": specific or "NOT_FOUND",
+                    "message": str(exc)}
         if status is not None and 400 <= status < 500:
-            return {
-                "category": "client_error",
-                "code": code or "BAD_REQUEST",
-                "message": str(exc),
-            }
+            return {"category": "client_error", "code": specific or "BAD_REQUEST",
+                    "message": str(exc)}
         # ForgejoError without an HTTP status (e.g. a parse failure).
-        return {
-            "category": "server_error",
-            "code": code or "FORGEJO_ERROR",
-            "message": str(exc),
-        }
+        return {"category": "server_error", "code": specific or "FORGEJO_ERROR",
+                "message": str(exc)}
     return {
         "category": "server_error",
         "code": "INTERNAL_ERROR",
@@ -98,21 +90,23 @@ def _classify(exc: Exception) -> dict[str, Any]:
 
 
 async def _safe(coro: Awaitable) -> Any:
-    """Boundary handler: run a client coroutine and never leak a raw exception.
+    """Boundary handler: run a client coroutine; on failure raise a ToolError so
+    the MCP result is flagged ``isError: true`` (agents can detect failure without
+    parsing content). The message is ``[CODE] message`` with a stable code.
 
-    Known errors become structured ``{"error": {...}}`` payloads the agent can
-    reason about; unexpected ones are logged server-side and returned as a
-    generic internal error. ``BaseException`` (KeyboardInterrupt / cancellation)
-    is intentionally *not* caught so shutdown and cancellation propagate.
+    ``BaseException`` (KeyboardInterrupt / cancellation) is intentionally *not*
+    caught so shutdown and cancellation propagate.
     """
     try:
         return await coro
     except (AuthError, ForgejoError) as e:
+        info = _classify(e)
         logger.info("Tool error: %s", e)
-        return {"error": _classify(e)}
-    except Exception as e:  # boundary must convert, not crash
+        raise ToolError(f"[{info['code']}] {info['message']}") from e
+    except Exception as e:  # boundary: convert to a flagged tool error, not a crash
         logger.exception("Unhandled tool error")
-        return {"error": _classify(e)}
+        info = _classify(e)
+        raise ToolError(f"[{info['code']}] {info['message']}") from e
 
 
 # --------------------------------------------------------------- auth / repos
@@ -319,6 +313,130 @@ async def move_card(
 async def delete_issue(owner: str, repo: str, number: int) -> dict:
     """Permanently delete an issue by number."""
     return await _safe(client.delete_issue(owner, repo, number))
+
+
+# --------------------------------------------------------------- bulk / reading
+def _summary(issue: dict) -> dict:
+    """Lightweight projection of a parsed issue (drops body and comments)."""
+    if "error" in issue:
+        return issue
+    return {k: issue.get(k) for k in ("number", "title", "state", "milestone")}
+
+
+@mcp.tool()
+async def bulk_move_cards(
+    owner: str, repo: str, project_id: int, moves: list[dict[str, int]]
+) -> dict:
+    """Move many cards at once, each to its own column.
+
+    Args:
+        moves: list of {"issue_number": N, "column_id": C}. Cards going to the
+            same column are placed in the order listed. Runs concurrently.
+    """
+    return await _safe(client.bulk_move_cards(owner, repo, project_id, moves))
+
+
+@mcp.tool()
+async def bulk_read_issues(
+    owner: str, repo: str, issue_numbers: list[int], state: str = "all"
+) -> dict:
+    """Read a summary (number, title, state, milestone) of many issues at once.
+
+    Lightweight — bodies and comments are omitted. Use read_card for full content.
+
+    Args:
+        state: 'open', 'closed', or 'all' (default) — filters the returned issues.
+
+    Returns ``count`` (successfully read), ``error_count``, the ``issues``
+    summaries, and any ``errors`` (issues that could not be read).
+    """
+    res = await _safe(client.bulk_read_issues(owner, repo, issue_numbers, state))
+    ok = [i for i in res if "error" not in i]
+    errors = [i for i in res if "error" in i]
+    return {
+        "count": len(ok),
+        "error_count": len(errors),
+        "issues": [_summary(i) for i in ok],
+        "errors": errors,
+    }
+
+
+@mcp.tool()
+async def read_card(owner: str, repo: str, number: int) -> dict:
+    """Full content of one card/issue: title, state, body, milestone, and all comments.
+
+    ⚠️ Network- and token-expensive. Avoid unless asked or necessary.
+    """
+    return await _safe(client.read_issue(owner, repo, number))
+
+
+@mcp.tool()
+async def read_column(
+    owner: str, repo: str, project_id: int, column_id: int,
+    state: str = "all", milestone: int | None = None,
+    limit: int | None = None, offset: int = 0,
+) -> dict:
+    """Full content of every card in a column.
+
+    Args:
+        state: 'open', 'closed', or 'all' (default).
+        milestone: optional milestone id to restrict to.
+        limit: max cards to read this call (None = no limit); offset to page.
+
+    ⚠️ Network- and token-expensive. Avoid unless asked or necessary; use
+    limit/offset to cap cost.
+    """
+    return await _safe(
+        client.read_column_content(
+            owner, repo, project_id, column_id, state, milestone, limit, offset
+        )
+    )
+
+
+@mcp.tool()
+async def read_milestone(
+    owner: str, repo: str, milestone_id: int,
+    state: str = "all", project: int | None = None,
+    limit: int | None = None, offset: int = 0,
+) -> dict:
+    """Full content of every issue attached to a milestone.
+
+    Args:
+        state: 'open', 'closed', or 'all' (default).
+        project: optional project id to restrict to.
+        limit: max issues to read this call (None = no limit); offset to page.
+
+    ⚠️ Network- and token-expensive. Avoid unless asked or necessary; use
+    limit/offset to cap cost.
+    """
+    return await _safe(
+        client.read_milestone_content(
+            owner, repo, milestone_id, state, project, limit, offset
+        )
+    )
+
+
+@mcp.tool()
+async def read_project(
+    owner: str, repo: str, project_id: int,
+    state: str = "all", milestone: int | None = None,
+    limit: int | None = None, offset: int = 0,
+) -> dict:
+    """Full content of an entire board: every column and every card's content.
+
+    Args:
+        state: 'open', 'closed', or 'all' (default).
+        milestone: optional milestone id to restrict to.
+        limit: max cards to read this call (None = no limit); offset to page.
+
+    ⚠️ Network- and token-expensive. Avoid unless asked or necessary; use
+    limit/offset to cap cost.
+    """
+    return await _safe(
+        client.read_project_content(
+            owner, repo, project_id, state, milestone, limit, offset
+        )
+    )
 
 
 # ------------------------------------------------------------------ milestones

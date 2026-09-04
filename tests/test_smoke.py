@@ -13,7 +13,15 @@ EXPECTED_TOOLS = {
     "move_card", "delete_issue",
     "list_milestones", "create_milestone", "edit_milestone",
     "close_milestone", "reopen_milestone", "delete_milestone",
+    "bulk_move_cards", "bulk_read_issues",
+    "read_card", "read_column", "read_milestone", "read_project",
 }
+
+
+def test_expensive_readers_carry_cost_warning():
+    tools = {t.name: t for t in asyncio.run(mcp.list_tools())}
+    for name in ("read_card", "read_column", "read_milestone", "read_project"):
+        assert "expensive" in (tools[name].description or "").lower(), name
 
 
 def test_server_registers_all_tools():

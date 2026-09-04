@@ -1,0 +1,63 @@
+site_name: forgejo-projects-mcp
+site_description: MCP server + CLI for managing Forgejo Projects / Kanban boards
+repo_url: https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP
+repo_name: ForgejoProjectsMCP
+docs_dir: docs
+
+extra:
+  version:
+    provider: mike
+
+plugins:
+  - search
+  - mike:
+      # Native GitHub Pages artifacts cannot contain symbolic links.
+      alias_type: redirect
+
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.expand
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Installation: installation.md
+  - Configuration: configuration.md
+  - Usage: usage.md
+  - Tools reference: tools.md
+  - CLI: cli.md
+  - Architecture: architecture.md
+  - Python API reference:
+      - Overview: reference/index.md
+      - __init__.py: reference/__init__.md
+      - _env.py: reference/_env.md
+      - cli.py: reference/cli.md
+      - client.py: reference/client.md
+      - server.py: reference/server.md
+  - Endpoint reference: forgejo-projects-automation-reference.md
+  - Releasing: RELEASING.md

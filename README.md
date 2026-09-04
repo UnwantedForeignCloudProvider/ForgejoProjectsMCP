@@ -31,9 +31,42 @@ to lose, or depend on it for production workflows. If/when Forgejo ships a real
 Projects API, migrate to it. Use at your own risk; test against a throwaway repo
 first.
 
-## Install (local build)
+## Prerequisites
 
-Clone the repo and install it as a system-wide command with uv:
+- **[uv](https://docs.astral.sh/uv/)** — used to install and run the tool.
+  Install it from the official guide:
+  <https://docs.astral.sh/uv/getting-started/installation/>.
+
+## Installation
+
+All methods install a `forgejo-projects-mcp` executable onto your PATH (in uv's
+tool bin directory). If uv warns that the directory isn't on your PATH, run
+`uv tool update-shell` once and restart your shell. Verify with
+`forgejo-projects-mcp --help` (or `uv tool list`).
+
+No `playwright install` step is needed — the tool uses Playwright's HTTP layer,
+not a real browser.
+
+### Latest release (PyPI)
+
+```bash
+uv tool install forgejo-projects-mcp
+uv tool upgrade forgejo-projects-mcp     # update later
+```
+
+### Beta testing (latest from source)
+
+Installs the current `main` branch straight from GitHub — newer than the last
+release, and not guaranteed stable:
+
+```bash
+uv tool install git+https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP
+uv tool upgrade forgejo-projects-mcp     # re-pull the latest main
+```
+
+### Local build (from a clone)
+
+For development, or to install a specific checkout:
 
 ```bash
 git clone https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP
@@ -41,18 +74,10 @@ cd ForgejoProjectsMCP
 uv tool install .
 ```
 
-This installs a `forgejo-projects-mcp` executable onto your PATH (in uv's tool
-bin directory). If uv warns that the directory isn't on your PATH, run
-`uv tool update-shell` once and restart your shell. Verify with:
-
-```bash
-forgejo-projects-mcp --help   # or: uv tool list
-```
-
-No `playwright install` step is needed — the tool uses Playwright's HTTP layer,
-not a real browser. To pick up local code changes automatically, install with
-`uv tool install --editable .`; to update after pulling changes, `uv tool
-install . --force`; to remove, `uv tool uninstall forgejo-projects-mcp`.
+To pick up local code changes automatically, install with
+`uv tool install --editable .`; to update after pulling changes,
+`uv tool install . --force`. To remove any of the above:
+`uv tool uninstall forgejo-projects-mcp`.
 
 ## Configuration
 
@@ -63,6 +88,13 @@ Credentials come from environment variables:
 | `FORGEJO_URL` | `https://forge.example.com` |
 | `FORGEJO_USERNAME` | `your-username` |
 | `FORGEJO_PASSWORD` | `your-password` |
+
+A `.env` file in the working directory is **loaded automatically** (via
+python-dotenv) — copy `.env.example` to `.env` and fill it in; no `source`/
+`export` needed. Real environment variables already set (and an MCP client's own
+`env` block) take precedence. See `.env.example` for the full list, including the
+optional `FORGEJO_MCP_MAX_CONCURRENCY`, `FORGEJO_MCP_RPS`, and
+`FORGEJO_MCP_LOG_LEVEL`.
 
 The authenticated session is cached at
 `<config>/forgejo_projects_mcp/storage_state.json` and refreshed automatically
@@ -78,7 +110,7 @@ uv run forgejo-projects-mcp            # stdio MCP server
 
 ### Register with an MCP client
 
-Once installed with `uv tool install .`, reference the command directly:
+Once installed, reference the command directly:
 
 ```json
 {
@@ -218,7 +250,37 @@ mcp_servers:
 - `create_issue(... project_id=)` — create an issue, optionally straight onto a board
 - `add_issues_to_project`, `remove_issues_from_project`
 - `move_card(owner, repo, project_id, column_id, issue_numbers)`
+- `bulk_move_cards(owner, repo, project_id, moves)` — move many cards, each to its
+  own column, in one call (`moves` = list of `{issue_number, column_id}`)
 - `delete_issue`
+
+**Bulk reads** (run concurrently, rate-limited)
+- `bulk_read_issues(owner, repo, issue_numbers, state="all")` — lightweight
+  summaries (number, title, state, milestone)
+- `read_card(owner, repo, number)` — one card's full content (body + comments) ⚠️
+- `read_column(owner, repo, project_id, column_id, state="all", milestone=None)` ⚠️
+- `read_milestone(owner, repo, milestone_id, state="all", project=None)` ⚠️
+- `read_project(owner, repo, project_id, state="all", milestone=None)` ⚠️
+
+Optional filters on the readers use direct values (no name lookup): `state`
+(`open`/`closed`/`all`), and a `milestone`/`project` **id** (each tool omits the
+filter that is already its own subject).
+
+The full readers take `limit`/`offset` to cap and page results, and return
+`total` / `returned` / `truncated` / `error_count` so cost and completeness are
+explicit. `bulk_read_issues` returns `count` (successful only) plus a separate
+`errors` list.
+
+⚠️ = network- and token-expensive; use only when needed. Concurrency and request
+rate are tunable via `FORGEJO_MCP_MAX_CONCURRENCY` (default 8) and
+`FORGEJO_MCP_RPS` (default 5).
+
+**Error signaling.** Tool failures are returned as MCP errors (`isError: true`)
+with a `[CODE] message` (e.g. `[NOT_FOUND]`, `[INVALID_STATE]`,
+`[MILESTONE_NOT_FOUND]`, `[NETWORK_ERROR]`) — agents can detect failure without
+parsing content. Invalid `state` values and missing projects/columns/milestones/
+issues are hard errors, not silent empty results. Individual issues that fail to
+read inside a bulk call are reported inline instead (partial success).
 
 **Milestones**
 - `list_milestones`, `create_milestone`, `edit_milestone`,
@@ -226,6 +288,28 @@ mcp_servers:
 
 Issue arguments use the **repo issue number** (what you see as `#N`); the server
 resolves the internal id automatically.
+
+## CLI (no MCP client needed)
+
+For harnesses that can't speak MCP, `forgejo-projects-cli` exposes **every tool
+as a subcommand**, generated from the same tool definitions and dispatched
+in-process — so it stays in sync automatically. It reads the same
+`FORGEJO_URL` / `FORGEJO_USERNAME` / `FORGEJO_PASSWORD` env vars, prints the JSON
+result to stdout, logs to stderr, and exits non-zero on an error result.
+
+```bash
+forgejo-projects-cli --help                      # lists every tool
+forgejo-projects-cli <tool> --help               # options for one tool
+
+forgejo-projects-cli list_repositories --query kanban
+forgejo-projects-cli create_project --owner o --repo r --title "Q3"
+forgejo-projects-cli read_project --owner o --repo r --project_id 3 --state open
+forgejo-projects-cli bulk_move_cards --owner o --repo r --project_id 3 \
+    --moves '[{"issue_number": 5, "column_id": 12}]'
+```
+
+Options mirror each tool's parameters (`--owner`, `--repo`, …); list/object
+parameters (`--issue_numbers`, `--moves`) take a JSON string.
 
 ## Notes
 
