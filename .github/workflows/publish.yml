@@ -103,11 +103,19 @@ jobs:
             echo "value=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      # Immutable releases lock their assets as soon as they are published.
+      # Keep the release as a draft until every distribution is attached.
+      - name: Create draft GitHub Release and upload distributions
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*
           body_path: RELEASE_NOTES.md
           generate_release_notes: true    # appends auto notes when the file is empty
           prerelease: ${{ steps.pre.outputs.value }}
+          draft: true
           fail_on_unmatched_files: true
+
+      - name: Publish GitHub Release after assets are attached
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$GITHUB_REF_NAME" --draft=false

@@ -56,13 +56,18 @@ Each tool is a thin async adapter. Simple list operations add a count wrapper; f
 
 The first authenticated operation follows this path:
 
-1. `ForgejoClient.ensure()` validates the three required credentials.
+1. `ForgejoClient.ensure()` validates the Forgejo URL.
 2. It starts Playwright if needed and opens an `APIRequestContext`.
 3. If `storage_state.json` exists, the cookies are loaded.
 4. `/user/settings` checks whether the session is still valid.
-5. If not authenticated, the client posts the username and password to `/user/login`.
+5. If not authenticated, the client validates the username/password and posts them to `/user/login`.
 6. A redirect response followed by a successful `/user/settings` check proves the session.
 7. Playwright storage state is written to the config directory.
+
+An optional credential-provider hook can recover an `AuthError` and retry this
+flow. Only an interactive `forgejo-projects-cli` invocation installs the hook;
+the stdio MCP server leaves it unset. Providers run outside the authentication
+lock, and a replacement URL discards the context created for the old origin.
 
 Every request passes through `_request()`:
 

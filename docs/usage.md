@@ -53,7 +53,14 @@ forgejo-projects-cli bulk_move_cards \
   --moves '[{"issue_number": 12, "column_id": 8}, {"issue_number": 13, "column_id": 9}]'
 ```
 
-Boolean flags accept `1`, `true`, `yes`, and `on` (case-insensitive) as true; any other value is false. The CLI prints a JSON result to stdout and returns exit code `1` when the MCP call fails.
+Boolean flags accept `1`, `true`, `yes`, and `on` (case-insensitive) as true; any other value is false. The CLI prints a JSON result to stdout and returns exit code `1` when the MCP call fails or `forgejo_status` reports `authenticated: false`.
+
+When stdin and stderr are terminals, the CLI requests missing credentials and
+re-prompts after rejected logins, up to three prompted attempts. Prompts and
+diagnostics use stderr so stdout remains valid JSON. Passwords are hidden and
+remain in memory; only the authenticated session state is cached. This recovery
+is deliberately unavailable to the stdio MCP server and noninteractive CLI
+invocations.
 
 ## Recommended workflow
 
@@ -167,7 +174,7 @@ Common codes include:
 
 | Code | Meaning |
 |---|---|
-| `MISSING_CONFIG` | One or more required environment variables are empty. |
+| `MISSING_CONFIG` | The URL is missing, or login is required and the username/password is missing. |
 | `AUTH_FAILED` | Login failed or did not establish a valid session. |
 | `NETWORK_ERROR` | The Forgejo instance could not be reached. |
 | `INVALID_STATE` | `state` was not `open`, `closed`, or `all`. |
@@ -198,4 +205,3 @@ This makes it suitable for shell scripts: treat exit code `0` as success and any
 - Project and milestone `state="all"` requests are implemented as separate open and closed page requests because Forgejo's page silently behaves like open when given all.
 - Writes are not transactional. A multi-step operation can make progress before a later request fails.
 - The web routes are undocumented and can change with Forgejo upgrades. Re-test the tool after an upgrade.
-

@@ -39,6 +39,7 @@ class FakeContext:
         self.handler = handler
         self.calls: list[dict] = []
         self.storage_saved: list[str] = []
+        self.disposed = False
 
     async def fetch(self, path, method="GET", **kw):
         self.calls.append({"method": method, "path": path, **kw})
@@ -61,7 +62,7 @@ class FakeContext:
         self.storage_saved.append(path)
 
     async def dispose(self):
-        pass
+        self.disposed = True
 
 
 class FakePlaywright:
@@ -70,6 +71,7 @@ class FakePlaywright:
     def __init__(self, handler: Callable):
         self._handler = handler
         self.contexts: list[FakeContext] = []
+        self.stopped = False
         outer = self
 
         class _Req:
@@ -80,6 +82,9 @@ class FakePlaywright:
                 return ctx
 
         self.request = _Req()
+
+    async def stop(self):
+        self.stopped = True
 
 
 def make_client(handler: Callable, authed: bool = True) -> ForgejoClient:

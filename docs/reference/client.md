@@ -60,6 +60,12 @@ async ensure() -> None
 
 Ensures an authenticated request context exists. It validates credentials, starts Playwright, loads `STATE_FILE` when present, checks `/user/settings`, and logs in if needed. Calls are serialized with an async lock.
 
+Only the Forgejo URL is required to load and verify cached state. Username and
+password are validated immediately before a fresh login. If an optional
+credential provider is installed with `set_credential_provider`, an
+`AuthError` can supply replacement credentials and retry; the provider is unset
+for normal MCP server operation.
+
 #### `login`
 
 ```python
@@ -77,7 +83,7 @@ Performs an explicit login and returns:
 }
 ```
 
-With `force=True`, the existing request context/cache is ignored and a fresh login is performed.
+With `force=True`, the existing request context/cache is ignored and a fresh login requiring username and password is performed. With `force=False`, valid cached state can be reused without login credentials.
 
 #### `status`
 
@@ -328,4 +334,3 @@ The following methods are implementation details but explain operational behavio
 - `_page` performs the final in-memory slice and returns `(selected, total)`.
 
 The route contract and HTML anchors are documented separately in the [automation reference](../forgejo-projects-automation-reference.md).
-

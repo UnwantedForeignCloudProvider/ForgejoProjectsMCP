@@ -83,11 +83,11 @@ To pick up local code changes automatically, install with
 
 Credentials come from environment variables:
 
-| Variable | Example |
-|---|---|
-| `FORGEJO_URL` | `https://forge.example.com` |
-| `FORGEJO_USERNAME` | `your-username` |
-| `FORGEJO_PASSWORD` | `your-password` |
+| Variable | When required | Example |
+|---|---|---|
+| `FORGEJO_URL` | Always, so the cached session can be checked | `https://forge.example.com` |
+| `FORGEJO_USERNAME` | When a fresh login is needed | `your-username` |
+| `FORGEJO_PASSWORD` | When a fresh login is needed | `your-password` |
 
 A `.env` file in the working directory is **loaded automatically** (via
 python-dotenv) — copy `.env.example` to `.env` and fill it in; no `source`/
@@ -100,6 +100,8 @@ The authenticated session is cached at
 `<config>/forgejo_projects_mcp/storage_state.json` and refreshed automatically
 when it expires. `<config>` is `$XDG_CONFIG_HOME` if set, otherwise `~/.config`
 — resolved in an OS-agnostic way (Linux, macOS, Windows) via `Path.home()`.
+A valid cached session can be reused with only `FORGEJO_URL`; username and
+password are requested again only when Forgejo requires a fresh login.
 
 ## Run
 
@@ -296,6 +298,12 @@ as a subcommand**, generated from the same tool definitions and dispatched
 in-process — so it stays in sync automatically. It reads the same
 `FORGEJO_URL` / `FORGEJO_USERNAME` / `FORGEJO_PASSWORD` env vars, prints the JSON
 result to stdout, logs to stderr, and exits non-zero on an error result.
+
+When stdin and stderr are attached to a terminal, missing or rejected
+credentials are requested interactively. Password input is hidden, and login is
+retried up to three times. Prompted credentials stay in memory; only the normal
+Playwright session state is saved. Piped/automated CLI invocations and the
+`forgejo-projects-mcp` stdio server never prompt.
 
 ```bash
 forgejo-projects-cli --help                      # lists every tool

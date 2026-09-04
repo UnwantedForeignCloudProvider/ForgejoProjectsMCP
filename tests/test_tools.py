@@ -34,6 +34,10 @@ def patch(monkeypatch, name, fn):
     monkeypatch.setattr(server.client, name, fn)
 
 
+def test_stdio_server_client_has_no_credential_provider():
+    assert server.client._credential_provider is None
+
+
 def test_list_repositories_wraps_count(monkeypatch):
     async def fake(query="", limit=50, page=1):
         return [{"full_name": "o/r"}, {"full_name": "o/s"}]

@@ -2,15 +2,26 @@
 
 Configuration is environment-based. The package also loads a `.env` file automatically before other package modules read the environment.
 
-## Required variables
+## Authentication variables
 
-| Variable | Description | Example |
-|---|---|---|
-| `FORGEJO_URL` | Forgejo instance base URL. Trailing `/` characters are removed. | `https://forge.example.com` |
-| `FORGEJO_USERNAME` | Forgejo username used for web login. | `your-username` |
-| `FORGEJO_PASSWORD` | Forgejo account password used for web login. | `your-password` |
+| Variable | Requirement | Description | Example |
+|---|---|---|---|
+| `FORGEJO_URL` | Always | Forgejo instance base URL. Trailing `/` characters are removed. | `https://forge.example.com` |
+| `FORGEJO_USERNAME` | Fresh login only | Forgejo username used for web login. | `your-username` |
+| `FORGEJO_PASSWORD` | Fresh login only | Forgejo account password used for web login. | `your-password` |
 
-All three must be non-empty when an operation needs authentication. Missing values produce an `AuthError` with code `MISSING_CONFIG`.
+The URL is needed before the client can load and check a cached session.
+Username and password are validated only when Forgejo requires a fresh login,
+including `authenticate(force=true)`. A valid cached session can therefore be
+used with only `FORGEJO_URL`. A value missing when it is required produces an
+`AuthError` with code `MISSING_CONFIG`.
+
+In an interactive terminal, `forgejo-projects-cli` prompts for missing values or
+replacement credentials after a rejected login. It tries at most three prompted
+credential sets. Prompts are written to stderr, the password is not echoed, and
+only the resulting session cookie state is persisted. The MCP stdio server and
+noninteractive CLI invocations never prompt, so configure their environment or
+`.env` file before use.
 
 The tool intentionally uses a session login rather than a personal access token. The internal web routes used for Projects are not covered by Forgejo's normal `/api/v1` token authentication.
 
@@ -73,6 +84,10 @@ Windows: <home>/.config/forgejo_projects_mcp/storage_state.json
 ```
 
 The client reuses this state and checks `/user/settings`. If the session expires, it logs in again and replaces the cache. `authenticate(force=true)` ignores the current cached session and creates a fresh login.
+
+The state does not store the configured URL, username, or password. A later
+process still needs `FORGEJO_URL`; if the cached session has expired, it also
+needs username and password or an interactive CLI prompt.
 
 The state file contains authentication cookies and must be treated as a credential. Protect it with the operating system's file permissions, do not put it in source control, and remove it when decommissioning a machine or account. Changing `XDG_CONFIG_HOME` makes the process use a different cache; it does not migrate the old file.
 

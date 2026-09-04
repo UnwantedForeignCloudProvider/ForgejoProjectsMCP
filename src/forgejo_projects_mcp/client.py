@@ -10,6 +10,8 @@ Credentials come from the environment:
     FORGEJO_USERNAME
     FORGEJO_PASSWORD
 
+The interactive CLI may provide missing or replacement values in memory.
+
 The authenticated session (cookies) is persisted to
     <config>/forgejo_projects_mcp/storage_state.json
 (where <config> is $XDG_CONFIG_HOME or ~/.config, resolved per-OS) and reused
@@ -22,6 +24,7 @@ import asyncio
 import logging
 import os
 import re
+from collections.abc import Awaitable, Callable
 from html import unescape
 from pathlib import Path
 from typing import Any
@@ -53,6 +56,9 @@ def _default_config_dir() -> Path:
 CONFIG_DIR = _default_config_dir()
 STATE_FILE = CONFIG_DIR / "storage_state.json"
 
+_URL_ENV = "FORGEJO_URL"
+_USERNAME_ENV = "FORGEJO_USERNAME"
+_PASSWORD_ENV = "FORGEJO_PASSWORD"
 _REDIRECTS = (301, 302, 303, 307, 308)
 
 # Politeness limits for the (undocumented) web routes. Bulk operations fan out
@@ -96,6 +102,9 @@ class AuthError(RuntimeError):
         self.code = code
 
 
+CredentialProvider = Callable[[AuthError], tuple[str, str, str] | None]
+
+
 class ForgejoError(RuntimeError):
     """Raised when a Forgejo web route errors or the instance is unreachable.
 
@@ -113,9 +122,10 @@ class ForgejoError(RuntimeError):
 
 class ForgejoClient:
     def __init__(self) -> None:
-        self.base_url = os.environ.get("FORGEJO_URL", "").rstrip("/")
-        self.username = os.environ.get("FORGEJO_USERNAME", "")
-        self.password = os.environ.get("FORGEJO_PASSWORD", "")
+        self.base_url = os.environ.get(_URL_ENV, "").rstrip("/")
+        self.username = os.environ.get(_USERNAME_ENV, "")
+        self.password = os.environ.get(_PASSWORD_ENV, "")
+        self._credential_provider: CredentialProvider | None = None
         self._pw: Playwright | None = None
         self._ctx: APIRequestContext | None = None
         self._lock = asyncio.Lock()
@@ -147,22 +157,77 @@ class ForgejoClient:
             await asyncio.sleep(wait)
 
     # ------------------------------------------------------------------ auth
-    def _check_env(self) -> None:
-        missing = [
-            name
-            for name, val in (
-                ("FORGEJO_URL", self.base_url),
-                ("FORGEJO_USERNAME", self.username),
-                ("FORGEJO_PASSWORD", self.password),
-            )
-            if not val
-        ]
+    def set_credential_provider(self, provider: CredentialProvider | None) -> None:
+        """Set an optional in-process credential recovery callback.
+
+        The stdio MCP server leaves this unset. The dedicated CLI installs a
+        provider only for interactive terminal invocations. The callback
+        receives the triggering AuthError and returns (URL, username, password)
+        or None to preserve the error.
+        """
+        self._credential_provider = provider
+
+    @staticmethod
+    def _raise_for_missing(values: tuple[tuple[str, str], ...]) -> None:
+        missing = [name for name, value in values if not value]
         if missing:
             logger.debug("Configuration validation failed missing=%s", ",".join(missing))
             raise AuthError(
                 "Missing environment variable(s): " + ", ".join(missing),
                 code="MISSING_CONFIG",
             )
+
+    def _check_base_url(self) -> None:
+        self._raise_for_missing(((_URL_ENV, self.base_url),))
+
+    def _check_login_credentials(self) -> None:
+        self._raise_for_missing(
+            (
+                (_USERNAME_ENV, self.username),
+                (_PASSWORD_ENV, self.password),
+            )
+        )
+
+    async def _recover_credentials(self, error: AuthError) -> bool:
+        """Ask the configured provider for replacements, if one is installed."""
+        provider = self._credential_provider
+        if provider is None:
+            return False
+        logger.debug("Requesting replacement credentials code=%s", error.code)
+        replacement = provider(error)
+        if replacement is None:
+            logger.debug("Credential provider declined recovery code=%s", error.code)
+            return False
+        base_url, username, password = replacement
+        normalized_url = base_url.rstrip("/")
+        url_changed = normalized_url != self.base_url
+        if url_changed and self._ctx is not None:
+            ctx, self._ctx = self._ctx, None
+            try:
+                await ctx.dispose()
+            except Exception:  # replacing a stale context must remain best-effort
+                logger.debug("Error disposing context after URL change", exc_info=True)
+        self.base_url = normalized_url
+        self.username = username
+        self.password = password
+        logger.debug(
+            "Replacement credentials applied url_changed=%s username_present=%s "
+            "password_present=%s",
+            url_changed,
+            bool(username),
+            bool(password),
+        )
+        return True
+
+    async def _with_credential_recovery(
+        self, operation: Callable[[], Awaitable[Any]]
+    ) -> Any:
+        while True:
+            try:
+                return await operation()
+            except AuthError as error:
+                if not await self._recover_credentials(error):
+                    raise
 
     def _unreachable(self, exc: Exception) -> ForgejoError:
         """Wrap a transport failure in a clean, non-leaking ForgejoError."""
@@ -192,9 +257,8 @@ class ForgejoClient:
         self._ctx = await self._pw.request.new_context(**kwargs)
         logger.debug("Request context created use_cached_state=%s", cached_state)
 
-    async def ensure(self) -> None:
-        """Guarantee an authenticated context exists, logging in if needed."""
-        self._check_env()
+    async def _ensure_once(self) -> None:
+        self._check_base_url()
         logger.debug(
             "Ensuring authenticated session driver_started=%s context_present=%s",
             self._pw is not None,
@@ -218,6 +282,10 @@ class ForgejoClient:
                 )
                 raise self._unreachable(e) from e
 
+    async def ensure(self) -> None:
+        """Guarantee an authenticated context exists, logging in if needed."""
+        await self._with_credential_recovery(self._ensure_once)
+
     async def _is_authenticated(self) -> bool:
         if self._ctx is None:
             logger.debug("Authentication probe skipped context_present=false")
@@ -235,6 +303,8 @@ class ForgejoClient:
         return authenticated
 
     async def _login_locked(self) -> None:
+        self._check_base_url()
+        self._check_login_credentials()
         logger.debug("Login attempt started")
         await self._new_context(use_state=False)
         assert self._ctx is not None
@@ -267,9 +337,10 @@ class ForgejoClient:
         await self._ctx.storage_state(path=str(STATE_FILE))
         logger.debug("Login completed session_state_persisted=true")
 
-    async def login(self, force: bool = False) -> dict[str, Any]:
-        """Explicit login. Returns basic session info."""
-        self._check_env()
+    async def _login_once(self, force: bool) -> None:
+        self._check_base_url()
+        if force:
+            self._check_login_credentials()
         logger.debug(
             "Explicit authentication requested force=%s context_present=%s",
             force,
@@ -291,6 +362,10 @@ class ForgejoClient:
                     "Explicit authentication failed error_type=%s", type(e).__name__
                 )
                 raise self._unreachable(e) from e
+
+    async def login(self, force: bool = False) -> dict[str, Any]:
+        """Explicit login. Returns basic session info."""
+        await self._with_credential_recovery(lambda: self._login_once(force))
         return {
             "authenticated": True,
             "instance": self.base_url,
@@ -451,11 +526,7 @@ class ForgejoClient:
         )
         if bounced and _retry:
             logger.info("Session expired for %s %s; re-authenticating", method, safe_path)
-            async with self._lock:
-                try:
-                    await self._login_locked()
-                except PlaywrightError as e:
-                    raise self._unreachable(e) from e
+            await self.login(force=True)
             logger.debug(
                 "Authentication retry scheduled method=%s path=%s", method, safe_path
             )

@@ -9,8 +9,9 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ## [Unreleased]
 
-### Added
-- (nothing yet)
+### Fixed
+- Publish GitHub Releases through a draft-first flow so immutable releases
+  receive the wheel and source distribution before publication.
 
 ## [0.1.0rc1] - 2026-09-04
 

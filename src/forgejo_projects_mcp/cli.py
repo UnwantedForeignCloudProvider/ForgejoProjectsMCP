@@ -13,17 +13,23 @@ error payload.
         --moves '[{"issue_number": 5, "column_id": 12}]'
 
 Credentials come from the same env vars as the server
-(FORGEJO_URL / FORGEJO_USERNAME / FORGEJO_PASSWORD).
+(FORGEJO_URL / FORGEJO_USERNAME / FORGEJO_PASSWORD). Interactive terminal
+invocations request missing or rejected values without persisting the password.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import getpass
 import json
+import sys
 from typing import Any
 
+from .client import AuthError, CredentialProvider
 from .server import client, mcp
+
+_MAX_AUTH_ATTEMPTS = 3
 
 
 def _bool(value: str) -> bool:
@@ -79,13 +85,75 @@ def _extract(result) -> str:
     return "null"
 
 
+def _read_text(prompt: str, current: str = "") -> str:
+    default = f" [{current}]" if current else ""
+    print(f"{prompt}{default}: ", end="", file=sys.stderr, flush=True)
+    value = sys.stdin.readline()
+    if not value:
+        raise EOFError
+    entered = value.rstrip("\r\n").strip()
+    return entered or current
+
+
+def _make_credential_provider() -> CredentialProvider:
+    attempts = 0
+
+    def provide(error: AuthError) -> tuple[str, str, str] | None:
+        nonlocal attempts
+        if attempts >= _MAX_AUTH_ATTEMPTS:
+            return None
+        attempts += 1
+        try:
+            if error.code == "AUTH_FAILED":
+                print(
+                    "Forgejo authentication failed; enter updated credentials.",
+                    file=sys.stderr,
+                )
+                base_url = _read_text("Forgejo URL", client.base_url)
+                username = _read_text("Forgejo username", client.username)
+                password = getpass.getpass("Forgejo password: ", stream=sys.stderr)
+                return base_url, username, password
+
+            base_url = client.base_url
+            username = client.username
+            password = client.password
+            if not base_url:
+                base_url = _read_text("Forgejo URL")
+            if not username:
+                username = _read_text("Forgejo username")
+            if not password:
+                password = getpass.getpass("Forgejo password: ", stream=sys.stderr)
+            return base_url, username, password
+        except (EOFError, KeyboardInterrupt):
+            print("\nForgejo authentication cancelled.", file=sys.stderr)
+            return None
+
+    return provide
+
+
+def _is_interactive() -> bool:
+    return sys.stdin.isatty() and sys.stderr.isatty()
+
+
 async def _invoke(name: str, arguments: dict) -> tuple[str, bool]:
     # Tool failures surface as raised ToolErrors (MCP isError). Convert them to a
     # JSON error payload on stdout + a non-zero exit code for the harness.
     try:
         try:
             result = await mcp.call_tool(name, arguments)
-            return _extract(result), False
+            output = _extract(result)
+            status = None
+            if name == "forgejo_status":
+                try:
+                    status = json.loads(output)
+                except json.JSONDecodeError:
+                    pass
+            status_failed = (
+                name == "forgejo_status"
+                and isinstance(status, dict)
+                and status.get("authenticated") is False
+            )
+            return output, status_failed
         except Exception as e:  # CLI boundary: report, never crash
             return json.dumps({"error": str(e)}, ensure_ascii=False), True
     finally:
@@ -98,7 +166,12 @@ def main(argv: list[str] | None = None) -> int:
     arguments = {
         k: v for k, v in vars(namespace).items() if k != "tool" and v is not None
     }
-    output, is_error = asyncio.run(_invoke(namespace.tool, arguments))
+    provider = _make_credential_provider() if _is_interactive() else None
+    client.set_credential_provider(provider)
+    try:
+        output, is_error = asyncio.run(_invoke(namespace.tool, arguments))
+    finally:
+        client.set_credential_provider(None)
     print(output)
     return 1 if is_error else 0
 

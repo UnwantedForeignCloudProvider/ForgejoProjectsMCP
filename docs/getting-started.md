@@ -28,7 +28,7 @@ FORGEJO_USERNAME='your-username'
 FORGEJO_PASSWORD='your-password'
 ```
 
-The package loads `.env` automatically from the current working directory or a parent directory. Existing environment variables and an MCP client's explicit `env` block take precedence. Keep this file private; it contains a real account password.
+The package loads `.env` automatically from the current working directory or a parent directory. Existing environment variables and an MCP client's explicit `env` block take precedence. Keep this file private; it contains a real account password. As an alternative for a manual first run, the dedicated CLI can prompt for these values without saving the password.
 
 For all optional settings and the session-cache location, see [Configuration](configuration.md).
 
@@ -52,7 +52,11 @@ A successful result looks like:
 }
 ```
 
-`forgejo_status` authenticates if necessary, so the first call may log in and write the session cache. A failed status response contains `authenticated: false` and an explanatory `error` field.
+`forgejo_status` authenticates if necessary, so the first call may prompt in an
+interactive terminal, log in, and write the session cache. It makes at most
+three prompted login attempts. A failed status response contains
+`authenticated: false`, an explanatory `error` field, and a nonzero CLI exit
+code. The stdio MCP server and redirected/piped CLI executions never prompt.
 
 ## 4. Find a repository
 
@@ -163,7 +167,10 @@ The package also documents ready-to-copy examples for Claude Code, Codex, Qwen C
 
 ### `MISSING_CONFIG`
 
-Set all three required variables: `FORGEJO_URL`, `FORGEJO_USERNAME`, and `FORGEJO_PASSWORD`. Check that the MCP client's `env` block uses the same names.
+Set `FORGEJO_URL`. Also set `FORGEJO_USERNAME` and `FORGEJO_PASSWORD` when no
+valid cached session exists or a forced login is requested. The interactive CLI
+can collect missing values; MCP clients and noninteractive scripts must provide
+them through the environment or `.env`.
 
 ### The password is changed but the old account still works
 
@@ -192,4 +199,3 @@ Before using the server on important work:
 5. confirm the results in Forgejo's web UI.
 
 The automated test suite is offline and does not replace a live-instance compatibility check.
-

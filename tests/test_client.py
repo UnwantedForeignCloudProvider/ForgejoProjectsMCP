@@ -60,6 +60,150 @@ def test_bad_credentials_raise(tmp_state):
         run(c.login())
 
 
+def test_cached_session_only_requires_url(tmp_state):
+    (tmp_state / "storage_state.json").write_text("{}")
+
+    def handler(method, path, kw):
+        if path == "/user/settings":
+            return FakeResponse(status=200)
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    c = make_client(handler, authed=False)
+    c.username = ""
+    c.password = ""
+    c._ctx = None
+
+    run(c.ensure())
+
+    assert len(c._pw.contexts) == 1
+    assert c._pw.contexts[0].new_context_kwargs["storage_state"].endswith(
+        "storage_state.json"
+    )
+    assert find_call(c, "POST", "/user/login") is None
+
+
+def test_non_forced_login_reuses_cache_without_login_credentials(tmp_state):
+    (tmp_state / "storage_state.json").write_text("{}")
+
+    def handler(method, path, kw):
+        if path == "/user/settings":
+            return FakeResponse(status=200)
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    c = make_client(handler, authed=False)
+    c.username = ""
+    c.password = ""
+    c._ctx = None
+
+    result = run(c.login())
+
+    assert result["authenticated"] is True
+    assert find_call(c, "POST", "/user/login") is None
+
+
+def test_invalid_cached_session_requires_login_credentials(tmp_state):
+    (tmp_state / "storage_state.json").write_text("{}")
+
+    def handler(method, path, kw):
+        if path == "/user/settings":
+            return FakeResponse(status=302)
+        raise AssertionError(f"unexpected request: {method} {path}")
+
+    c = make_client(handler, authed=False)
+    c.username = ""
+    c.password = ""
+    c._ctx = None
+
+    with pytest.raises(AuthError) as exc:
+        run(c.ensure())
+
+    assert exc.value.code == "MISSING_CONFIG"
+    assert "FORGEJO_USERNAME" in str(exc.value)
+    assert "FORGEJO_PASSWORD" in str(exc.value)
+    assert find_call(c, "POST", "/user/login") is None
+
+
+def test_force_login_requires_credentials_even_with_valid_session():
+    c = make_client(lambda method, path, kw: FakeResponse(status=200), authed=False)
+    c.username = ""
+    c.password = ""
+
+    with pytest.raises(AuthError) as exc:
+        run(c.login(force=True))
+
+    assert exc.value.code == "MISSING_CONFIG"
+
+
+def test_credential_provider_recovers_and_recreates_context_for_new_url(tmp_state):
+    logged_in = False
+
+    def handler(method, path, kw):
+        nonlocal logged_in
+        if method == "POST" and path == "/user/login":
+            if kw["form"]["password"] == "good-password":
+                logged_in = True
+                return FakeResponse(status=303)
+            return FakeResponse(status=200)
+        if path == "/user/settings":
+            return FakeResponse(status=200 if logged_in else 302)
+        return FakeResponse(status=200)
+
+    c = make_client(handler, authed=False)
+    c.username = "wrong-user"
+    c.password = "wrong-password"
+    old_url = c.base_url
+    recoveries = []
+
+    def provide(error):
+        recoveries.append(error.code)
+        return "https://other-forge.test/", "good-user", "good-password"
+
+    c.set_credential_provider(provide)
+    result = run(c.login())
+
+    assert result["authenticated"] is True
+    assert recoveries == ["AUTH_FAILED"]
+    assert c.base_url != old_url
+    assert c._pw.contexts[0].disposed is True
+    assert c._pw.contexts[-1].new_context_kwargs["base_url"] == c.base_url
+    assert any(ctx.storage_saved for ctx in c._pw.contexts)
+
+
+def test_session_bounce_can_recover_missing_login_credentials(tmp_state):
+    bounced = False
+    logged_in = False
+
+    def handler(method, path, kw):
+        nonlocal bounced, logged_in
+        if method == "POST" and path == "/user/login":
+            logged_in = True
+            return FakeResponse(status=303)
+        if path == "/user/settings":
+            return FakeResponse(status=200 if logged_in else 302)
+        if path == "/repo/search" and not bounced:
+            bounced = True
+            return FakeResponse(status=200, url="https://forge.test/user/login")
+        if path == "/repo/search":
+            return FakeResponse(status=200, json_data={"data": []})
+        return FakeResponse(status=200)
+
+    c = make_client(handler, authed=True)
+    c.username = ""
+    c.password = ""
+    recoveries = []
+
+    def provide(error):
+        recoveries.append(error.code)
+        return c.base_url, "user", "password"
+
+    c.set_credential_provider(provide)
+    repos = run(c.list_repositories())
+
+    assert repos == []
+    assert recoveries == ["MISSING_CONFIG"]
+    assert logged_in is True
+
+
 def test_request_retries_after_session_bounce():
     state = {"bounced": False}
 

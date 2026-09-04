@@ -11,7 +11,9 @@ Written to be followed by an AI agent, but equally usable by a human.
 
 Releases are **tag-driven**: pushing a git tag `vX.Y.Z` triggers
 `.github/workflows/publish.yml`, which builds the package, publishes it to PyPI
-(OIDC trusted publishing), and creates a GitHub Release with the built artifacts.
+(OIDC trusted publishing), and creates a draft GitHub Release, attaches the built
+artifacts, then publishes it. The draft-first order is required when GitHub
+release immutability is enabled because published releases cannot accept assets.
 The same tag triggers `.github/workflows/docs.yml`, which stores the new mike
 version on `gh-pages` and deploys the complete version tree through GitHub's
 native Pages artifact workflow.
@@ -54,6 +56,12 @@ maintainer rather than assuming.
       workflow `publish.yml`, environment `pypi`.
 - [ ] A GitHub **Environment named `pypi`** exists in repo Settings
       (optionally with required reviewers to gate real publishes).
+
+GitHub release immutability may remain enabled. The `github-release` job is
+compatible with it: `softprops/action-gh-release` must retain `draft: true`, and
+the final `gh release edit --draft=false` step must run only after the wheel and
+source distribution have been uploaded. If asset upload fails, the draft stays
+mutable and the failed job can be rerun safely.
 
 Missing Pages configuration fails the Docs workflow without affecting package
 publishing. Missing PyPI configuration fails the `pypi-publish` job; the
@@ -202,7 +210,8 @@ local tag).
       `build`, `pypi-publish`, `github-release`).
 - [ ] PyPI shows the new version: <https://pypi.org/project/forgejo-projects-mcp/>.
 - [ ] The GitHub **Release** for `vX.Y.Z` exists, has the changelog notes, and has
-      both `*.whl` and `*.tar.gz` attached.
+      both `*.whl` and `*.tar.gz` attached. If repository release immutability is
+      enabled, the release is immutable only after those files are present.
 - [ ] A clean install works:
 
       uvx --from forgejo-projects-mcp==X.Y.Z forgejo-projects-mcp --help
@@ -226,6 +235,11 @@ local tag).
 - **A bad version reached PyPI**: it cannot be overwritten. **Yank** it on PyPI
   (hides it from new installs without breaking pins) and release a fixed
   **higher** version. Do this only when instructed.
+- **GitHub Release asset upload failed because the release was already
+  immutable**: a published immutable release cannot accept the missing files,
+  even if repository immutability is later disabled. Do not delete the release,
+  delete or move the tag, or reuse its version. Keep the published release as-is,
+  preserve the workflow's draft-first sequence, and release a higher version.
 - **TestPyPI dry run**: to rehearse without touching real PyPI, uncomment the
   `repository-url` line in `publish.yml`'s publish step and configure a matching
   trusted publisher on test.pypi.org.

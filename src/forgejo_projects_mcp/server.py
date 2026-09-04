@@ -1,7 +1,8 @@
 """MCP server exposing Forgejo Projects/Kanban management tools.
 
 Run with:  forgejo-projects-mcp   (stdio transport)
-Requires FORGEJO_URL, FORGEJO_USERNAME, FORGEJO_PASSWORD in the environment.
+Requires FORGEJO_URL in the environment. FORGEJO_USERNAME and FORGEJO_PASSWORD
+are also required when no valid cached session is available.
 """
 
 from __future__ import annotations
