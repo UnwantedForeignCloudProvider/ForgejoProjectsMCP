@@ -1,0 +1,1609 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="MCP server + CLI for managing Forgejo Projects / Kanban boards">
+      
+      
+      
+      
+        <link rel="prev" href="../configuration/">
+      
+      
+        <link rel="next" href="../tools/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Usage - forgejo-projects-mcp</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#usage" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="forgejo-projects-mcp" class="md-header__button md-logo" aria-label="forgejo-projects-mcp" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            forgejo-projects-mcp
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Usage
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ForgejoProjectsMCP
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="forgejo-projects-mcp" class="md-nav__button md-logo" aria-label="forgejo-projects-mcp" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    forgejo-projects-mcp
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ForgejoProjectsMCP
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#registering-the-mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registering the MCP server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using the CLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tool reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session-and-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session and discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issues-and-cards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issues and cards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bulk-and-full-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk and full reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#milestones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Milestones
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Error handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-and-consistency-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost and consistency notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Python API reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/__init__/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    __init__.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/_env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    _env.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cli.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    client.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    server.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../forgejo-projects-automation-reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../RELEASING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Releasing
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#registering-the-mcp-server" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Registering the MCP server
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-the-cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Using the CLI
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recommended workflow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tool-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tool reference
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tool reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#session-and-discovery" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Session and discovery
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#projects" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Projects
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#columns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Columns
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issues-and-cards" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issues and cards
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#bulk-and-full-reads" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Bulk and full reads
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#milestones" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Milestones
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#error-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Error handling
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Error handling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mcp" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MCP
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cli" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        CLI
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-and-consistency-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost and consistency notes
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h1>
+<p>The package exposes the same operations through an MCP stdio server and a generated CLI. MCP clients should use the tools by name; shell users and harnesses can use the equivalent subcommands.</p>
+<h2 id="registering-the-mcp-server">Registering the MCP server<a class="headerlink" href="#registering-the-mcp-server" title="Permanent link">&para;</a></h2>
+<p>Install the package and make sure <code>forgejo-projects-mcp</code> is on PATH. Add a local stdio server to your MCP client:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"mcpServers"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">"forgejo-projects-mcp"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nt">"command"</span><span class="p">:</span><span class="w"> </span><span class="s2">"forgejo-projects-mcp"</span><span class="p">,</span>
+<span class="w">      </span><span class="nt">"env"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nt">"FORGEJO_URL"</span><span class="p">:</span><span class="w"> </span><span class="s2">"https://forge.example.com"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"FORGEJO_USERNAME"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-username"</span><span class="p">,</span>
+<span class="w">        </span><span class="nt">"FORGEJO_PASSWORD"</span><span class="p">:</span><span class="w"> </span><span class="s2">"your-password"</span>
+<span class="w">      </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<p>If the client does not inherit your shell PATH, use the absolute executable path. See <a href="../getting-started/">Getting started</a> for client-specific registration examples.</p>
+<h2 id="using-the-cli">Using the CLI<a class="headerlink" href="#using-the-cli" title="Permanent link">&para;</a></h2>
+<p>List all generated commands:</p>
+<div class="highlight"><pre><span></span><code>forgejo-projects-cli<span class="w"> </span>--help
+</code></pre></div>
+<p>Inspect one command and its generated options:</p>
+<div class="highlight"><pre><span></span><code>forgejo-projects-cli<span class="w"> </span>read_project<span class="w"> </span>--help
+</code></pre></div>
+<p>Scalar options use ordinary flags. Arrays and objects are JSON strings:</p>
+<div class="highlight"><pre><span></span><code>forgejo-projects-cli<span class="w"> </span>bulk_read_issues<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--owner<span class="w"> </span>team<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--repo<span class="w"> </span>platform<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--issue_numbers<span class="w"> </span><span class="s1">'[12, 13, 14]'</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--state<span class="w"> </span>open
+
+forgejo-projects-cli<span class="w"> </span>bulk_move_cards<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--owner<span class="w"> </span>team<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--repo<span class="w"> </span>platform<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--project_id<span class="w"> </span><span class="m">12</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--moves<span class="w"> </span><span class="s1">'[{"issue_number": 12, "column_id": 8}, {"issue_number": 13, "column_id": 9}]'</span>
+</code></pre></div>
+<p>Boolean flags accept <code>1</code>, <code>true</code>, <code>yes</code>, and <code>on</code> (case-insensitive) as true; any other value is false. The CLI prints a JSON result to stdout and returns exit code <code>1</code> when the MCP call fails.</p>
+<h2 id="recommended-workflow">Recommended workflow<a class="headerlink" href="#recommended-workflow" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Call <code>forgejo_status</code> or the CLI equivalent.</li>
+<li>Call <code>list_repositories</code> if the repository is not already known.</li>
+<li>Call <code>list_projects</code> with <code>state="all"</code> when a closed board may be relevant.</li>
+<li>Call <code>get_project</code> to obtain project and column IDs.</li>
+<li>Use the smallest operation that answers the task.</li>
+<li>Use <code>read_card</code> or a full reader only when body/comment content is needed.</li>
+<li>Re-read the board after destructive or structural changes when confirmation matters.</li>
+</ol>
+<p>Use a throwaway repository while validating compatibility with a new Forgejo release.</p>
+<h2 id="tool-reference">Tool reference<a class="headerlink" href="#tool-reference" title="Permanent link">&para;</a></h2>
+<p>The following table is the complete MCP surface. Required arguments have no default. Optional arguments and defaults are shown explicitly.</p>
+<h3 id="session-and-discovery">Session and discovery<a class="headerlink" href="#session-and-discovery" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>forgejo_status</code></td>
+<td>none</td>
+<td>Authentication status, instance, username, and cache state. Errors are returned as <code>authenticated: false</code>.</td>
+</tr>
+<tr>
+<td><code>authenticate</code></td>
+<td><code>force: bool = false</code></td>
+<td>Logs in and caches the session. <code>force=true</code> skips the existing cache.</td>
+</tr>
+<tr>
+<td><code>list_repositories</code></td>
+<td><code>query: str = ""</code>, <code>limit: int = 50</code>, <code>page: int = 1</code></td>
+<td><code>{count, repositories}</code>. Each repository includes <code>full_name</code>, <code>owner</code>, <code>name</code>, <code>description</code>, <code>private</code>, <code>archived</code>, <code>empty</code>, and <code>fork</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="projects">Projects<a class="headerlink" href="#projects" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Result / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list_projects</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>state: open\|closed\|all = open</code></td>
+<td><code>{count, projects}</code> where each project has <code>id</code> and <code>title</code>. <code>all</code> combines separate open and closed requests.</td>
+</tr>
+<tr>
+<td><code>create_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>title</code>, <code>description: str = ""</code>, <code>card_type: text\|images_and_text = text</code></td>
+<td><code>{created, project}</code>. The new project ID is recovered by reading the projects page.</td>
+</tr>
+<tr>
+<td><code>get_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code></td>
+<td>Board <code>{id, title, columns}</code>. Each column contains <code>id</code>, <code>title</code>, and cards with <code>issue_id</code>, repository <code>number</code>, and <code>title</code>.</td>
+</tr>
+<tr>
+<td><code>update_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>title: str\|null = null</code>, <code>description: str\|null = null</code>, <code>card_type: str\|null = null</code></td>
+<td><code>{updated, project_id}</code>. Title and card type are read from the edit form when omitted. The current implementation sends an empty description when <code>description</code> is omitted, so provide the desired description if it must be retained.</td>
+</tr>
+<tr>
+<td><code>close_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code></td>
+<td>Archives the project and returns <code>{close: true, project_id}</code>.</td>
+</tr>
+<tr>
+<td><code>reopen_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code></td>
+<td>Reopens the project and returns <code>{open: true, project_id}</code>.</td>
+</tr>
+<tr>
+<td><code>delete_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code></td>
+<td>Permanently deletes the project. Issues survive. Returns <code>{deleted: true, project_id}</code>.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="columns">Columns<a class="headerlink" href="#columns" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Result / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create_column</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>title</code>, <code>color: str = ""</code></td>
+<td><code>{created, column}</code>. <code>color</code> may be a hex value such as <code>#e01e5a</code>.</td>
+</tr>
+<tr>
+<td><code>edit_column</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>column_id</code>, <code>title: str\|null = null</code>, <code>color: str\|null = null</code></td>
+<td><code>{updated, column_id}</code>. Only supplied fields are sent.</td>
+</tr>
+<tr>
+<td><code>delete_column</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>column_id</code></td>
+<td><code>{deleted, column_id}</code>. Cards return to the default/uncategorized location. The default column cannot be deleted; set another default first.</td>
+</tr>
+<tr>
+<td><code>set_default_column</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>column_id</code></td>
+<td><code>{default_column, project_id}</code>. New attached cards land in this column.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="issues-and-cards">Issues and cards<a class="headerlink" href="#issues-and-cards" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Result / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>create_issue</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>title</code>, <code>body: str = ""</code>, <code>project_id: int\|null = null</code>, <code>milestone_id: int\|null = null</code>, <code>label_ids: list[int]\|null = null</code>, <code>assignee_ids: list[int]\|null = null</code></td>
+<td>Creates an issue. A project ID places it on that board; optional numeric milestone, label, and assignee IDs are passed to Forgejo. Returns <code>{created, number, title}</code>.</td>
+</tr>
+<tr>
+<td><code>add_issues_to_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>issue_numbers: list[int]</code></td>
+<td>Attaches existing repository issues as cards and returns <code>{attached, project_id}</code>. New attachments use the project's default column.</td>
+</tr>
+<tr>
+<td><code>remove_issues_from_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>issue_numbers: list[int]</code></td>
+<td>Detaches cards from a project while leaving the issues intact. Returns <code>{detached}</code>.</td>
+</tr>
+<tr>
+<td><code>move_card</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>column_id</code>, <code>issue_numbers: list[int]</code></td>
+<td>Moves one or more attached cards to one column. List order controls the submitted sorting order.</td>
+</tr>
+<tr>
+<td><code>delete_issue</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>number</code></td>
+<td>Permanently deletes the issue, not merely the card. Use <code>remove_issues_from_project</code> to preserve the issue.</td>
+</tr>
+</tbody>
+</table>
+<p>Issue arguments use repository numbers such as <code>42</code>, not internal issue IDs. The client fetches each issue page to resolve the ID required by Forgejo's project routes.</p>
+<h3 id="bulk-and-full-reads">Bulk and full reads<a class="headerlink" href="#bulk-and-full-reads" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Result / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bulk_move_cards</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>moves: list[{issue_number, column_id}]</code></td>
+<td>Moves many cards concurrently. Items targeting the same column preserve input order. Returns <code>{moved_count, columns}</code>.</td>
+</tr>
+<tr>
+<td><code>bulk_read_issues</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>issue_numbers</code>, <code>state: open\|closed\|all = all</code></td>
+<td>Lightweight summaries only: <code>{count, error_count, issues, errors}</code>. Body and comments are omitted. Individual failures are reported in <code>errors</code>.</td>
+</tr>
+<tr>
+<td><code>read_card</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>number</code></td>
+<td><strong>Expensive.</strong> Full issue content: <code>number</code>, <code>title</code>, <code>state</code>, <code>body</code>, <code>milestone</code>, and <code>comments</code>.</td>
+</tr>
+<tr>
+<td><code>read_column</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>column_id</code>, <code>state = all</code>, <code>milestone: int\|null = null</code>, <code>limit: int\|null = null</code>, <code>offset: int = 0</code></td>
+<td><strong>Expensive.</strong> Full issue content for one column plus <code>{filters, total, returned, truncated, error_count, issues}</code>.</td>
+</tr>
+<tr>
+<td><code>read_milestone</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>milestone_id</code>, <code>state = all</code>, <code>project: int\|null = null</code>, <code>limit: int\|null = null</code>, <code>offset: int = 0</code></td>
+<td><strong>Expensive.</strong> Full issue content for a milestone plus pagination and filter metadata.</td>
+</tr>
+<tr>
+<td><code>read_project</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>project_id</code>, <code>state = all</code>, <code>milestone: int\|null = null</code>, <code>limit: int\|null = null</code>, <code>offset: int = 0</code></td>
+<td><strong>Expensive.</strong> Full issue content grouped under every board column plus pagination and filter metadata.</td>
+</tr>
+</tbody>
+</table>
+<p>All full readers accept direct numeric IDs for their optional <code>milestone</code> or <code>project</code> filter. A reader's <code>limit</code> applies after the matching card/issue numbers have been collected, and <code>offset</code> is zero-based. Use <code>truncated=true</code> to know that another page remains.</p>
+<p>Full issue content has this shape:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">"number"</span><span class="p">:</span><span class="w"> </span><span class="mi">42</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"title"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Prepare release notes"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"state"</span><span class="p">:</span><span class="w"> </span><span class="s2">"open"</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"body"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Document the changes before tagging."</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">"milestone"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="mi">7</span><span class="p">,</span><span class="w"> </span><span class="nt">"title"</span><span class="p">:</span><span class="w"> </span><span class="s2">"v1.2"</span><span class="p">},</span>
+<span class="w">  </span><span class="nt">"comments"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<span class="w">    </span><span class="p">{</span><span class="nt">"author"</span><span class="p">:</span><span class="w"> </span><span class="s2">"maintainer"</span><span class="p">,</span><span class="w"> </span><span class="nt">"body"</span><span class="p">:</span><span class="w"> </span><span class="s2">"Please include migration notes."</span><span class="p">}</span>
+<span class="w">  </span><span class="p">]</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><code>milestone</code> is <code>null</code> when there is no milestone. A reader can return partial results: <code>error_count</code> reports issue pages that failed, and the failed issue is retained with an <code>error</code> field where the client can represent it.</p>
+<h3 id="milestones">Milestones<a class="headerlink" href="#milestones" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Arguments</th>
+<th>Result / behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>list_milestones</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>state: open\|closed\|all = open</code></td>
+<td><code>{count, milestones}</code> with <code>{id, title}</code> entries. <code>all</code> merges open and closed pages.</td>
+</tr>
+<tr>
+<td><code>create_milestone</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>title</code>, <code>description: str = ""</code>, <code>deadline: str = ""</code></td>
+<td>Creates a milestone. <code>deadline</code> is <code>YYYY-MM-DD</code>. Returns <code>{created, milestone}</code>.</td>
+</tr>
+<tr>
+<td><code>edit_milestone</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>milestone_id</code>, <code>title: str\|null = null</code>, <code>description: str\|null = null</code>, <code>deadline: str\|null = null</code></td>
+<td>Updates milestone fields and returns <code>{updated, milestone_id}</code>. The current implementation sends empty strings for omitted values; supply the desired values when preserving content matters.</td>
+</tr>
+<tr>
+<td><code>close_milestone</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>milestone_id</code></td>
+<td>Closes a milestone and returns <code>{close: true, milestone_id}</code>.</td>
+</tr>
+<tr>
+<td><code>reopen_milestone</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>milestone_id</code></td>
+<td>Reopens a milestone and returns <code>{open: true, milestone_id}</code>.</td>
+</tr>
+<tr>
+<td><code>delete_milestone</code></td>
+<td><code>owner</code>, <code>repo</code>, <code>milestone_id</code></td>
+<td>Deletes a milestone and returns <code>{deleted: true, milestone_id}</code>.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="error-handling">Error handling<a class="headerlink" href="#error-handling" title="Permanent link">&para;</a></h2>
+<h3 id="mcp">MCP<a class="headerlink" href="#mcp" title="Permanent link">&para;</a></h3>
+<p>Tool failures are raised as MCP <code>ToolError</code> results, so MCP clients receive an error result with <code>isError: true</code>. The text starts with a stable code:</p>
+<div class="highlight"><pre><span></span><code>[NOT_FOUND] GET /team/platform/projects/999 -&gt; HTTP 404
+</code></pre></div>
+<p>Common codes include:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>MISSING_CONFIG</code></td>
+<td>One or more required environment variables are empty.</td>
+</tr>
+<tr>
+<td><code>AUTH_FAILED</code></td>
+<td>Login failed or did not establish a valid session.</td>
+</tr>
+<tr>
+<td><code>NETWORK_ERROR</code></td>
+<td>The Forgejo instance could not be reached.</td>
+</tr>
+<tr>
+<td><code>INVALID_STATE</code></td>
+<td><code>state</code> was not <code>open</code>, <code>closed</code>, or <code>all</code>.</td>
+</tr>
+<tr>
+<td><code>ISSUE_NOT_FOUND</code></td>
+<td>A repository issue page did not expose its internal ID.</td>
+</tr>
+<tr>
+<td><code>COLUMN_NOT_FOUND</code></td>
+<td>A requested column is not on the project board.</td>
+</tr>
+<tr>
+<td><code>MILESTONE_NOT_FOUND</code></td>
+<td>A requested milestone is not present.</td>
+</tr>
+<tr>
+<td><code>NOT_FOUND</code></td>
+<td>A generic upstream HTTP 404.</td>
+</tr>
+<tr>
+<td><code>FORBIDDEN</code> / <code>BAD_REQUEST</code></td>
+<td>Generic upstream 4xx responses.</td>
+</tr>
+<tr>
+<td><code>UPSTREAM_ERROR</code></td>
+<td>Upstream HTTP 5xx response.</td>
+</tr>
+<tr>
+<td><code>INTERNAL_ERROR</code></td>
+<td>Unexpected server-side failure; details are in logs, not exposed to the caller.</td>
+</tr>
+</tbody>
+</table>
+<p>Network and upstream 5xx errors include a suggested <code>retry_after</code> value in the internal classification. The MCP-facing text remains concise.</p>
+<h3 id="cli">CLI<a class="headerlink" href="#cli" title="Permanent link">&para;</a></h3>
+<p>The CLI prints a JSON error object and returns a non-zero exit code:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="nt">"error"</span><span class="p">:</span><span class="w"> </span><span class="s2">"[NOT_FOUND] ..."</span><span class="p">}</span>
+</code></pre></div>
+<p>This makes it suitable for shell scripts: treat exit code <code>0</code> as success and any other code as failure.</p>
+<h2 id="cost-and-consistency-notes">Cost and consistency notes<a class="headerlink" href="#cost-and-consistency-notes" title="Permanent link">&para;</a></h2>
+<ul>
+<li><code>bulk_read_issues</code> is the preferred way to obtain many lightweight summaries.</li>
+<li><code>read_card</code>, <code>read_column</code>, <code>read_milestone</code>, and <code>read_project</code> fetch full HTML issue pages and are network- and token-expensive.</li>
+<li>Project and milestone <code>state="all"</code> requests are implemented as separate open and closed page requests because Forgejo's page silently behaves like open when given all.</li>
+<li>Writes are not transactional. A multi-step operation can make progress before a later request fails.</li>
+<li>The web routes are undocumented and can change with Forgejo upgrades. Re-test the tool after an upgrade.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.expand", "navigation.top", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
