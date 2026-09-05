@@ -9,6 +9,8 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ## [Unreleased]
 
+## [0.1.0rc3] - 2026-09-05
+
 ### Added
 - Persist the non-secret connection settings (instance URL and username) to
   `<config>/forgejo_projects_mcp/config.json` after a successful login, so later

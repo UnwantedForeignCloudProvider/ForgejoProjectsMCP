@@ -24,12 +24,22 @@ when the environment can't speak MCP.
   `https://forge.example.com`). Configure `FORGEJO_USERNAME` and
   `FORGEJO_PASSWORD` when a fresh login is needed. A valid cached session can be
   reused with only the URL.
+- The same values can be passed as options before or after the tool name:
+  `--forgejo-url`, `--forgejo-username`, and `--forgejo-password-stdin` (reads
+  the password from the first line of stdin). Precedence is **CLI option > env
+  var > persisted config**. After the first successful login the URL and
+  username are persisted, so later runs need no configuration at all; the
+  password is never persisted.
 - In an interactive terminal, the CLI prompts for missing values and retries
   rejected credentials up to three times. Password input is hidden and remains
   in memory; only the authenticated session state is cached.
+- `forgejo_status` reports the instance version and the behavior resolved for
+  it, which is the quickest way to see what the client is talking to.
 
 Missing values in noninteractive use, or a cancelled interactive prompt, fail
-with `[MISSING_CONFIG]`. Do not put credentials on the command line.
+with `[MISSING_CONFIG]`. Never put a password in argv (`--forgejo-password` is
+visible in process lists and shell history) — pipe it to
+`--forgejo-password-stdin` instead.
 
 ## Discovering commands (do this instead of guessing)
 
