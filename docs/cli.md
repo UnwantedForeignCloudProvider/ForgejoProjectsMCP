@@ -7,10 +7,36 @@ to **stdout**, logs to **stderr**, and exits **non-zero on error**.
 
 When stdin and stderr are attached to a terminal, the CLI prompts for missing
 credentials and retries rejected credentials up to three times. Password input
-is hidden and remains in memory; only the authenticated session state is cached.
-Noninteractive invocations never prompt and require the relevant environment or
-`.env` values. Use `forgejo-projects-cli authenticate --force true` to replace a
-cached session explicitly.
+is hidden and remains in memory; the authenticated session state and the
+non-secret config file are cached. Noninteractive invocations never prompt and
+require the relevant environment, `.env`, CLI options, or a persisted config.
+Use `forgejo-projects-cli authenticate --force true` to replace a cached session
+explicitly.
+
+## Credentials
+
+Credentials come from the same env vars as the MCP server
+(`FORGEJO_URL` / `FORGEJO_USERNAME` / `FORGEJO_PASSWORD`) and may also be passed
+as options, accepted **either before or after the tool name**:
+
+| Option | Notes |
+|---|---|
+| `--forgejo-url URL` | Overrides `FORGEJO_URL` and the persisted config. |
+| `--forgejo-username NAME` | Overrides `FORGEJO_USERNAME` and the persisted config. |
+| `--forgejo-password PASSWORD` | **Insecure**: visible in process lists and shell history. |
+| `--forgejo-password-stdin` | Reads the password from the first line of stdin (preferred). |
+
+Precedence is **CLI option > environment variable > persisted config file**.
+`--forgejo-password` and `--forgejo-password-stdin` are mutually exclusive. After
+the first successful login the URL and username are persisted, so later runs need
+no configuration (see [Configuration](configuration.md#persisted-settings-and-session-cache)).
+
+```bash
+# Explicit credentials, password piped in rather than placed in argv:
+printf '%s\n' "$FORGEJO_PW" | forgejo-projects-cli \
+    --forgejo-url https://forge.example.com --forgejo-username me \
+    --forgejo-password-stdin list_repositories
+```
 
 ## Discover
 

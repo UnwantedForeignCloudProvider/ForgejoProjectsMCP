@@ -23,7 +23,13 @@ approach by nature:
   parsing can drift.
 - It authenticates as a **real user with a password**, not a scoped API token,
   and performs writes with no transactional guarantees.
-- It was verified against **one instance (v15.0.7)** only.
+
+To take some of the sting out of that, the client detects the instance version
+(from the same response that checks the session, so it costs no extra request)
+and adapts its routes, parsing and CSRF handling to it. **Every published Forgejo
+release from 1.20 to 16** is exercised end to end by an automated integration
+suite that boots a throwaway instance per version. That does not make the approach robust — it
+just means known differences are handled and regressions are caught early.
 
 Treat it as a **best-effort convenience / stop-gap for personal or experimental
 use**. Do **not** put it on a critical path, run it against data you can't afford
@@ -98,10 +104,17 @@ optional `FORGEJO_MCP_MAX_CONCURRENCY`, `FORGEJO_MCP_RPS`, and
 
 The authenticated session is cached at
 `<config>/forgejo_projects_mcp/storage_state.json` and refreshed automatically
-when it expires. `<config>` is `$XDG_CONFIG_HOME` if set, otherwise `~/.config`
+when it expires. Alongside it, the non-secret connection settings (instance URL
+and username) are persisted to `<config>/forgejo_projects_mcp/config.json` after
+a successful login. `<config>` is `$XDG_CONFIG_HOME` if set, otherwise `~/.config`
 — resolved in an OS-agnostic way (Linux, macOS, Windows) via `Path.home()`.
-A valid cached session can be reused with only `FORGEJO_URL`; username and
-password are requested again only when Forgejo requires a fresh login.
+
+Because the URL and username are persisted, **after the first successful login no
+environment variables are required at all** — the cached session plus
+`config.json` are enough. The password is **never** written to disk: it is
+requested again (via env var, CLI option, or interactive prompt) only when
+Forgejo requires a fresh login. Environment variables always take precedence over
+`config.json`.
 
 ## Run
 
@@ -299,11 +312,24 @@ in-process — so it stays in sync automatically. It reads the same
 `FORGEJO_URL` / `FORGEJO_USERNAME` / `FORGEJO_PASSWORD` env vars, prints the JSON
 result to stdout, logs to stderr, and exits non-zero on an error result.
 
+Credentials can also be passed as options, accepted **either before or after the
+tool name**:
+
+| Option | Notes |
+|---|---|
+| `--forgejo-url URL` | Overrides `FORGEJO_URL` and saved config |
+| `--forgejo-username NAME` | Overrides `FORGEJO_USERNAME` and saved config |
+| `--forgejo-password PASSWORD` | **Insecure** — visible in process lists / shell history |
+| `--forgejo-password-stdin` | Reads the password from the first line of stdin (preferred) |
+
+Precedence is **CLI option > env var > persisted `config.json`**. `--forgejo-password`
+and `--forgejo-password-stdin` are mutually exclusive.
+
 When stdin and stderr are attached to a terminal, missing or rejected
 credentials are requested interactively. Password input is hidden, and login is
 retried up to three times. Prompted credentials stay in memory; only the normal
-Playwright session state is saved. Piped/automated CLI invocations and the
-`forgejo-projects-mcp` stdio server never prompt.
+session state and non-secret `config.json` are saved. Piped/automated CLI
+invocations and the `forgejo-projects-mcp` stdio server never prompt.
 
 ```bash
 forgejo-projects-cli --help                      # lists every tool
@@ -314,6 +340,11 @@ forgejo-projects-cli create_project --owner o --repo r --title "Q3"
 forgejo-projects-cli read_project --owner o --repo r --project_id 3 --state open
 forgejo-projects-cli bulk_move_cards --owner o --repo r --project_id 3 \
     --moves '[{"issue_number": 5, "column_id": 12}]'
+
+# One-shot with explicit credentials, password piped in (not in argv):
+printf '%s\n' "$FORGEJO_PW" | forgejo-projects-cli \
+    --forgejo-url https://forge.example.com --forgejo-username me \
+    --forgejo-password-stdin list_repositories
 ```
 
 Options mirror each tool's parameters (`--owner`, `--repo`, …); list/object
@@ -321,7 +352,12 @@ parameters (`--issue_numbers`, `--moves`) take a JSON string.
 
 ## Notes
 
-- Tested against Forgejo **v15.0.7**. The web routes are internal and unversioned,
-  so a major Forgejo upgrade may require adjusting `client.py`.
+- Verified against Forgejo **1.20, 1.21 and majors 7 through 16** — every
+  published release — each exercised end to end by the integration suite
+  (`uv run pytest -m integration --forgejo-version N`, which starts the instance
+  for you). The web routes are internal and unversioned, so a future release may
+  still need a new entry in `compat.py`.
+- `forgejo_status` reports the detected version, the behavior in force for it,
+  and whether that version is one the suite covers.
 - The Forgejo session cookie does **not** authorize `/api/v1`, so everything runs
   through the web routes.

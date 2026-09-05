@@ -72,6 +72,29 @@ invocations.
 6. Use `read_card` or a full reader only when body/comment content is needed.
 7. Re-read the board after destructive or structural changes when confirmation matters.
 
+`forgejo_status` reports the instance version and the behavior resolved for it:
+
+```json
+{
+  "authenticated": true,
+  "instance": "https://forge.example.com",
+  "username": "your-username",
+  "version": "16.0.3~gitea-1.22.0",
+  "compatibility": {
+    "version_short": "16.0.3",
+    "csrf_mode": "origin",
+    "quirks": [],
+    "verified": true
+  }
+}
+```
+
+The version costs nothing extra: it is read from the same response that proves
+the session. `quirks` names the version-specific behavior in force, and
+`verified: false` means the release is outside the range the integration suite
+exercises — the client still runs, using its newest verified behavior. See
+[Architecture](architecture.md#version-adaptation).
+
 Use a throwaway repository while validating compatibility with a new Forgejo release.
 
 ## Tool reference
@@ -82,8 +105,8 @@ The following table is the complete MCP surface. Required arguments have no defa
 
 | Tool | Arguments | Result |
 |---|---|---|
-| `forgejo_status` | none | Authentication status, instance, username, and cache state. Errors are returned as `authenticated: false`. |
-| `authenticate` | `force: bool = false` | Logs in and caches the session. `force=true` skips the existing cache. |
+| `forgejo_status` | none | Authentication status, instance, username, cache state, the detected Forgejo `version`, and the `compatibility` profile resolved for it. Errors are returned as `authenticated: false`. |
+| `authenticate` | `force: bool = false` | Logs in and caches the session; also returns `version` and `compatibility`. `force=true` skips the existing cache. |
 | `list_repositories` | `query: str = ""`, `limit: int = 50`, `page: int = 1` | `{count, repositories}`. Each repository includes `full_name`, `owner`, `name`, `description`, `private`, `archived`, `empty`, and `fork`. |
 
 ### Projects

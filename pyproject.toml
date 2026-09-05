@@ -52,6 +52,9 @@ include = ["src", "README.md", "LICENSE"]
 pythonpath = ["src", "tests"]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: live tests against a real Forgejo instance (opt-in; require --forgejo-version or FORGEJO_TEST_URL, see tests/composes/)",
+]
 
 [tool.ruff]
 line-length = 100

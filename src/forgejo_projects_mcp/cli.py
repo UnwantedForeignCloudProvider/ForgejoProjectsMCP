@@ -13,8 +13,18 @@ error payload.
         --moves '[{"issue_number": 5, "column_id": 12}]'
 
 Credentials come from the same env vars as the server
-(FORGEJO_URL / FORGEJO_USERNAME / FORGEJO_PASSWORD). Interactive terminal
-invocations request missing or rejected values without persisting the password.
+(FORGEJO_URL / FORGEJO_USERNAME / FORGEJO_PASSWORD), and may also be passed as
+options accepted before or after the tool name::
+
+    forgejo-projects-cli --forgejo-url https://forge.example.com \
+        --forgejo-username me --forgejo-password-stdin list_repositories
+
+Precedence is CLI arg > env var > persisted config file. The URL and username are
+persisted after a successful login and reused automatically, so later runs need
+no configuration. The password is never persisted: prefer --forgejo-password-stdin
+(reads the first line of stdin) over --forgejo-password, which is visible in
+process lists and shell history. Interactive terminal invocations still request
+missing or rejected values without persisting the password.
 """
 
 from __future__ import annotations
@@ -55,17 +65,64 @@ def _add_argument(parser: argparse.ArgumentParser, name: str, spec: dict, requir
     parser.add_argument(f"--{name}", **kwargs)
 
 
+def _build_global_parser() -> argparse.ArgumentParser:
+    """Connection options accepted either before or after the tool name."""
+    globals_ = argparse.ArgumentParser(add_help=False)
+    conn = globals_.add_argument_group("connection")
+    # default=SUPPRESS so these options work either before or after the tool name:
+    # a subparser reapplies its defaults last, which would otherwise clobber a
+    # value the top-level parser already parsed from before the tool name.
+    conn.add_argument(
+        "--forgejo-url",
+        dest="forgejo_url",
+        metavar="URL",
+        default=argparse.SUPPRESS,
+        help="Forgejo instance URL (overrides FORGEJO_URL and saved config).",
+    )
+    conn.add_argument(
+        "--forgejo-username",
+        dest="forgejo_username",
+        metavar="NAME",
+        default=argparse.SUPPRESS,
+        help="Forgejo username (overrides FORGEJO_USERNAME and saved config).",
+    )
+    conn.add_argument(
+        "--forgejo-password",
+        dest="forgejo_password",
+        metavar="PASSWORD",
+        default=argparse.SUPPRESS,
+        help="Forgejo password. INSECURE: visible in process lists and shell "
+        "history. Prefer --forgejo-password-stdin.",
+    )
+    conn.add_argument(
+        "--forgejo-password-stdin",
+        dest="forgejo_password_stdin",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="Read the Forgejo password from the first line of stdin.",
+    )
+    return globals_
+
+
+# dest names of the connection options, stripped before building tool arguments.
+_GLOBAL_DESTS = frozenset(
+    {"forgejo_url", "forgejo_username", "forgejo_password", "forgejo_password_stdin"}
+)
+
+
 def build_parser(tools) -> argparse.ArgumentParser:
+    globals_ = _build_global_parser()
     parser = argparse.ArgumentParser(
         prog="forgejo-projects-cli",
         description="Manage Forgejo Projects/Kanban from the command line "
         "(same tools as the MCP server).",
+        parents=[globals_],
     )
     subparsers = parser.add_subparsers(dest="tool", required=True, metavar="TOOL")
     for tool in sorted(tools, key=lambda t: t.name):
         doc = (tool.description or "").strip()
         sub = subparsers.add_parser(
-            tool.name, help=doc.split("\n", 1)[0], description=doc
+            tool.name, help=doc.split("\n", 1)[0], description=doc, parents=[globals_]
         )
         schema = tool.input_schema or {}
         required = set(schema.get("required", []))
@@ -160,11 +217,35 @@ async def _invoke(name: str, arguments: dict) -> tuple[str, bool]:
         await client.close()
 
 
+def _apply_cli_credentials(parser: argparse.ArgumentParser, namespace) -> None:
+    """Override client credentials from CLI args (highest precedence)."""
+    url = getattr(namespace, "forgejo_url", None)
+    username = getattr(namespace, "forgejo_username", None)
+    password = getattr(namespace, "forgejo_password", None)
+    password_stdin = getattr(namespace, "forgejo_password_stdin", False)
+    if password is not None and password_stdin:
+        parser.error(
+            "--forgejo-password and --forgejo-password-stdin are mutually exclusive"
+        )
+    if url:
+        client.base_url = url.rstrip("/")
+    if username:
+        client.username = username
+    if password_stdin:
+        client.password = sys.stdin.readline().rstrip("\r\n")
+    elif password is not None:
+        client.password = password
+
+
 def main(argv: list[str] | None = None) -> int:
     tools = asyncio.run(mcp.list_tools())
-    namespace = build_parser(tools).parse_args(argv)
+    parser = build_parser(tools)
+    namespace = parser.parse_args(argv)
+    _apply_cli_credentials(parser, namespace)
     arguments = {
-        k: v for k, v in vars(namespace).items() if k != "tool" and v is not None
+        k: v
+        for k, v in vars(namespace).items()
+        if k != "tool" and k not in _GLOBAL_DESTS and v is not None
     }
     provider = _make_credential_provider() if _is_interactive() else None
     client.set_credential_provider(provider)

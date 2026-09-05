@@ -113,11 +113,17 @@ async def _safe(coro: Awaitable) -> Any:
 # --------------------------------------------------------------- auth / repos
 @mcp.tool()
 async def forgejo_status() -> dict:
-    """Report whether the MCP is authenticated to the Forgejo instance.
+    """Report authentication, the Forgejo version, and how the tools adapt to it.
 
     Reads credentials from FORGEJO_URL / FORGEJO_USERNAME / FORGEJO_PASSWORD and
     authenticates if needed, persisting the session under the OS config dir
     (e.g. ~/.config/forgejo_projects_mcp/).
+
+    The session check reads the instance version out of the same response, so
+    ``version`` costs no extra request. ``compatibility`` reports the behavior
+    resolved for that version: its ``quirks`` and whether it is ``verified``
+    (inside the range the integration suite exercises). An unverified or
+    undetectable version is not an error -- the newest verified behavior is used.
     """
     return await client.status()
 
@@ -125,6 +131,9 @@ async def forgejo_status() -> dict:
 @mcp.tool()
 async def authenticate(force: bool = False) -> dict:
     """Authenticate to Forgejo and cache the session.
+
+    Returns the detected instance ``version`` and the ``compatibility`` profile
+    resolved for it, alongside the session details.
 
     Args:
         force: If true, ignore any cached session and log in fresh.

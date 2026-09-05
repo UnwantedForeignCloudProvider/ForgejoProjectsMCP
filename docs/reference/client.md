@@ -60,6 +60,8 @@ async ensure() -> None
 
 Ensures an authenticated request context exists. It validates credentials, starts Playwright, loads `STATE_FILE` when present, checks `/user/settings`, and logs in if needed. Calls are serialized with an async lock.
 
+The `/user/settings` check is a rendered Forgejo page, and the client reads the instance version out of that same response — plus the session CSRF token on releases that require one. Version detection therefore costs no extra request, and the resolved [compatibility profile](compat.md) is available from `client.version` and `client.profile` afterwards.
+
 Only the Forgejo URL is required to load and verify cached state. Username and
 password are validated immediately before a fresh login. If an optional
 credential provider is installed with `set_credential_provider`, an
@@ -79,9 +81,20 @@ Performs an explicit login and returns:
   "authenticated": true,
   "instance": "https://forge.example.com",
   "username": "your-username",
-  "state_file": ".../storage_state.json"
+  "version": "16.0.3~gitea-1.22.0",
+  "compatibility": {
+    "version": "16.0.3~gitea-1.22.0",
+    "version_short": "16.0.3",
+    "csrf_mode": "origin",
+    "quirks": [],
+    "verified": true
+  },
+  "state_file": ".../storage_state.json",
+  "config_file": ".../config.json"
 }
 ```
+
+`version` is `null` when the page carried no version marker; the client then uses the newest verified behavior. `compatibility` is [`Profile.describe()`](compat.md#describe).
 
 With `force=True`, the existing request context/cache is ignored and a fresh login requiring username and password is performed. With `force=False`, valid cached state can be reused without login credentials.
 
@@ -91,7 +104,7 @@ With `force=True`, the existing request context/cache is ignored and a fresh log
 async status() -> dict[str, Any]
 ```
 
-Calls `ensure()` and returns authenticated session information including `state_cached`. `AuthError` and `ForgejoError` are converted into `{authenticated: False, error, instance}` rather than raised.
+Calls `ensure()` and returns authenticated session information including `state_cached`, the detected `version`, and the resolved `compatibility` profile. `AuthError` and `ForgejoError` are converted into `{authenticated: False, error, instance, version}` rather than raised.
 
 #### `close`
 
@@ -100,6 +113,24 @@ async close() -> None
 ```
 
 Disposes the request context and stops Playwright. It is safe to call multiple times and suppresses teardown failures after logging them at debug level.
+
+### Version adaptation
+
+```python
+client.version  # Version | None -- the detected instance version
+client.profile  # Profile -- the behavior resolved for it
+```
+
+Both are established by the session probe. Every route the client requests is
+rendered from `profile.route(...)`, and every HTML element it scrapes comes from
+the profile's ordered pattern candidates, so version differences live in
+[`compat.py`](compat.md) rather than in the operations below.
+
+Writes carry an `X-Csrf-Token` header when the profile's `csrf_mode` is `token`
+(Forgejo below 14.0). If a write is nevertheless rejected with HTTP 400 and an
+*Invalid CSRF token* body, the client fetches a token, retries the request once,
+and keeps sending one for the rest of the session — so an instance whose
+behavior does not match its version still works.
 
 ### Discovery and projects
 
@@ -141,7 +172,7 @@ async create_project(
 ) -> dict[str, Any]
 ```
 
-Posts a project form, maps `text` to Forgejo card type `1` and `images_and_text` to `2`, then reads the open project list to recover the new ID. Returns `{created: True, project: {id, title} | None}`.
+Posts a project form, maps `text` to Forgejo card type `1` and `images_and_text` to `2` (through the profile's `card_types`), then reads the open project list to recover the new ID. Returns `{created: True, project: {id, title} | None}`.
 
 #### `get_project`
 
@@ -270,6 +301,8 @@ Issue HTML is normalized to:
 
 `read_issue(owner, repo, number)` fetches and parses one issue. If the page lacks a number marker, it uses the requested number as a fallback.
 
+The `body` is read from the raw element Forgejo keys by the issue's **global id**, taken from `data-issue-id` on the same page. Issue numbers restart per repository while ids count across the instance, so looking the body up by number returns an empty string in every repository but the first one an instance created.
+
 ```python
 async read_issue(owner, repo, number: int) -> dict[str, Any]
 async bulk_read_issues(owner, repo, numbers: list[int], state: str = "all") -> list[dict[str, Any]]
@@ -327,9 +360,12 @@ Milestone listing validates state and merges separate open/closed pages for `all
 
 The following methods are implementation details but explain operational behavior:
 
-- `_request` adds authentication, JSON/form encoding, throttling, 429/503 retries, session-bounce re-authentication, and HTTP error conversion;
+- `_request` adds authentication, JSON/form encoding, CSRF headers, throttling, 429/503 retries, session-bounce re-authentication, one CSRF-rejection retry, and HTTP error conversion;
+- `_absorb_page` learns the version and CSRF token from any rendered page, and swaps in the profile for a newly detected version;
+- `_route` renders an internal route through the active profile;
 - `_default_config_dir` computes the OS-independent cache root;
-- `_parse_projects_list`, `_parse_board`, `_parse_issue`, and `_parse_milestones` scrape HTML with regular expressions;
+- `_parse_projects_list`, `_parse_board`, `_parse_issue`, and `_parse_milestones` scrape HTML using the active profile's pattern candidates; each also accepts an explicit profile and falls back to `DEFAULT_PROFILE`;
+- `_issue_body` resolves an issue's body by its global id, falling back to its number;
 - `_filtered_issue_numbers` uses the repository issues page for server-side state/project/milestone filtering; and
 - `_page` performs the final in-memory slice and returns `(selected, total)`.
 

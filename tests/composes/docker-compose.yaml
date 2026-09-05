@@ -1,0 +1,48 @@
+# Throwaway Forgejo instance for the integration suite.
+#
+# One parameterized stack serves every version: FORGEJO_VERSION picks the image
+# and FORGEJO_PORT the host port, and both are baked into the compose project
+# name so several versions can run side by side.
+#
+#   FORGEJO_VERSION=16 FORGEJO_PORT=3316 \
+#     docker compose -f tests/composes/docker-compose.yaml up -d --wait
+#   FORGEJO_VERSION=16 FORGEJO_PORT=3316 \
+#     docker compose -f tests/composes/docker-compose.yaml down
+#
+# The integration suite starts and stops this stack for you -- see
+# tests/composes/README.md. There is deliberately no data volume: the instance
+# is disposable, so its state lives in the container's own writable layer and
+# disappears with `down`.
+name: forgejo-test-${FORGEJO_VERSION:-16}
+
+services:
+  server:
+    image: codeberg.org/forgejo/forgejo:${FORGEJO_VERSION:-16}
+    container_name: forgejo-test-${FORGEJO_VERSION:-16}
+    # `no`: this is an ephemeral test instance, not a long-running service.
+    restart: "no"
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      # Unattended setup: skip the first-run install wizard, and pin the public
+      # URL to the mapped host port so redirect-based flows resolve correctly.
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__server__DOMAIN: localhost
+      FORGEJO__server__HTTP_PORT: "3000"
+      FORGEJO__server__ROOT_URL: "http://localhost:${FORGEJO_PORT:-3316}/"
+      FORGEJO__database__DB_TYPE: sqlite3
+      FORGEJO__log__LEVEL: warn
+      # Keep the instance quiet and self-contained: no outbound mail, no
+      # federation chatter, no cron churn while tests run.
+      FORGEJO__mailer__ENABLED: "false"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+    ports:
+      - "${FORGEJO_PORT:-3316}:3000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "wget -qO- http://localhost:3000/api/healthz >/dev/null 2>&1 || exit 1"
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s

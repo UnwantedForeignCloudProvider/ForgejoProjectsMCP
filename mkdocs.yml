@@ -58,5 +58,6 @@ nav:
       - _env.py: reference/_env.md
       - cli.py: reference/cli.md
       - client.py: reference/client.md
+      - compat.py: reference/compat.md
       - server.py: reference/server.md
   - Endpoint reference: forgejo-projects-automation-reference.md

@@ -47,6 +47,82 @@ def test_login_persists_session(tmp_state):
     assert any(ctx.storage_saved for ctx in c._pw.contexts)
 
 
+def test_login_persists_non_secret_config(tmp_state):
+    import json
+
+    import forgejo_projects_mcp.client as client_mod
+
+    state = {"logged_in": False}
+
+    def handler(method, path, kw):
+        if path == "/user/login" and method == "POST":
+            state["logged_in"] = True
+            return FakeResponse(status=303, headers={"location": "/"}, url="/")
+        if path == "/user/settings":
+            return FakeResponse(status=200 if state["logged_in"] else 302)
+        return FakeResponse(status=200)
+
+    c = make_client(handler, authed=False)
+    c.base_url = "https://forge.test"
+    c.username = "alice"
+    c.password = "secret"
+
+    run(c.login())
+
+    saved = json.loads(client_mod.CONFIG_FILE.read_text())
+    assert saved == {"base_url": "https://forge.test", "username": "alice"}
+    # the password is never written to disk
+    assert "secret" not in client_mod.CONFIG_FILE.read_text()
+
+
+def test_saved_config_supplies_url_and_username(tmp_state, monkeypatch):
+    import json
+
+    import forgejo_projects_mcp.client as client_mod
+
+    client_mod.CONFIG_FILE.write_text(
+        json.dumps({"base_url": "https://saved.test", "username": "bob"})
+    )
+    for var in ("FORGEJO_URL", "FORGEJO_USERNAME", "FORGEJO_PASSWORD"):
+        monkeypatch.delenv(var, raising=False)
+
+    c = client_mod.ForgejoClient()
+
+    assert c.base_url == "https://saved.test"
+    assert c.username == "bob"
+    assert c.password == ""  # never loaded from the config file
+
+
+def test_env_overrides_saved_config(tmp_state, monkeypatch):
+    import json
+
+    import forgejo_projects_mcp.client as client_mod
+
+    client_mod.CONFIG_FILE.write_text(
+        json.dumps({"base_url": "https://saved.test", "username": "bob"})
+    )
+    monkeypatch.setenv("FORGEJO_URL", "https://env.test")
+    monkeypatch.delenv("FORGEJO_USERNAME", raising=False)
+
+    c = client_mod.ForgejoClient()
+
+    assert c.base_url == "https://env.test"   # env wins
+    assert c.username == "bob"                # falls back to saved
+
+
+def test_corrupt_config_file_is_ignored(tmp_state, monkeypatch):
+    import forgejo_projects_mcp.client as client_mod
+
+    client_mod.CONFIG_FILE.write_text("{not valid json")
+    for var in ("FORGEJO_URL", "FORGEJO_USERNAME"):
+        monkeypatch.delenv(var, raising=False)
+
+    c = client_mod.ForgejoClient()
+
+    assert c.base_url == ""
+    assert c.username == ""
+
+
 def test_bad_credentials_raise(tmp_state):
     def handler(method, path, kw):
         if path == "/user/login":

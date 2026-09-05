@@ -70,6 +70,100 @@ def test_cli_returns_nonzero_on_error(monkeypatch, capsys):
     assert "NOT_FOUND" in out["error"]   # error is a "[CODE] message" string
 
 
+def test_cli_credential_args_override_client(monkeypatch, capsys):
+    client = make_client(lambda method, path, kw: FakeResponse(status=200))
+    monkeypatch.setattr(server, "client", client)
+    monkeypatch.setattr(cli, "client", client)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+
+    async def fake(owner, repo, state="open"):
+        return []
+
+    monkeypatch.setattr(server.client, "list_projects", fake)
+    rc = cli.main([
+        "--forgejo-url", "https://arg.test/",
+        "--forgejo-username", "argu",
+        "--forgejo-password", "argp",
+        "list_projects", "--owner", "o", "--repo", "r",
+    ])
+
+    assert rc == 0
+    assert client.base_url == "https://arg.test"   # trailing slash stripped
+    assert client.username == "argu"
+    assert client.password == "argp"
+
+
+def test_cli_credential_args_work_after_tool_name(monkeypatch, capsys):
+    client = make_client(lambda method, path, kw: FakeResponse(status=200))
+    monkeypatch.setattr(server, "client", client)
+    monkeypatch.setattr(cli, "client", client)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+
+    async def fake(owner, repo, state="open"):
+        return []
+
+    monkeypatch.setattr(server.client, "list_projects", fake)
+    rc = cli.main([
+        "list_projects", "--owner", "o", "--repo", "r",
+        "--forgejo-url", "https://after.test",
+    ])
+
+    assert rc == 0
+    assert client.base_url == "https://after.test"
+
+
+def test_cli_password_stdin(monkeypatch, capsys):
+    client = make_client(lambda method, path, kw: FakeResponse(status=200))
+    monkeypatch.setattr(server, "client", client)
+    monkeypatch.setattr(cli, "client", client)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+    monkeypatch.setattr(cli.sys, "stdin", io.StringIO("from-stdin\n"))
+
+    async def fake(owner, repo, state="open"):
+        return []
+
+    monkeypatch.setattr(server.client, "list_projects", fake)
+    rc = cli.main([
+        "--forgejo-password-stdin", "list_projects", "--owner", "o", "--repo", "r",
+    ])
+
+    assert rc == 0
+    assert client.password == "from-stdin"
+
+
+def test_cli_password_and_stdin_are_mutually_exclusive(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+    with pytest.raises(SystemExit) as exc:
+        cli.main([
+            "--forgejo-password", "x", "--forgejo-password-stdin",
+            "forgejo_status",
+        ])
+    assert exc.value.code != 0
+    assert "mutually exclusive" in capsys.readouterr().err
+
+
+def test_credential_args_not_forwarded_as_tool_arguments(monkeypatch, capsys):
+    seen = {}
+
+    async def fake(owner, repo, state="open"):
+        seen["kwargs_ok"] = True
+        return []
+
+    client = make_client(lambda method, path, kw: FakeResponse(status=200))
+    monkeypatch.setattr(server, "client", client)
+    monkeypatch.setattr(cli, "client", client)
+    monkeypatch.setattr(cli, "_is_interactive", lambda: False)
+    monkeypatch.setattr(server.client, "list_projects", fake)
+
+    rc = cli.main([
+        "--forgejo-url", "https://arg.test", "list_projects",
+        "--owner", "o", "--repo", "r",
+    ])
+
+    assert rc == 0
+    assert seen.get("kwargs_ok") is True   # call succeeded => no unexpected kwargs
+
+
 def test_interactive_cli_prompts_for_missing_credentials(
     monkeypatch, capsys, tmp_state
 ):

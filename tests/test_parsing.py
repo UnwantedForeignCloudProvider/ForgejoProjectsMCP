@@ -133,3 +133,45 @@ def test_error_detail_html_is_not_dumped():
         text="<html><body><p>Internal server error</p></body></html>",
     )
     assert asyncio.run(ForgejoClient._error_detail(r)) == ": Internal server error"
+
+
+# Forgejo keys the body's raw element by the issue's *global* id, which differs
+# from the repo-local number in every repository but the first one an instance
+# creates. This is the markup a real instance renders.
+ISSUE_BY_GLOBAL_ID = """
+<meta property="og:title" content="Second repo card">
+<span class="index">#3</span>
+<div class="issue-content" data-issue-id="317"></div>
+<div class="ui green label issue-state-label"><svg class="svg octicon-issue-opened"></svg></div>
+<div id="issue-317-raw" class="raw-content">The real body.</div>
+"""
+
+
+def test_parse_issue_body_is_keyed_by_the_global_issue_id():
+    got = ForgejoClient._parse_issue(ISSUE_BY_GLOBAL_ID)
+    assert got["number"] == 3            # what the caller asked for
+    assert got["body"] == "The real body."   # keyed by 317, not by 3
+
+
+def test_parse_issue_body_falls_back_to_the_number():
+    """A release that keys the element by the number keeps working."""
+    html = ISSUE_BY_GLOBAL_ID.replace('id="issue-317-raw"', 'id="issue-3-raw"')
+    assert ForgejoClient._parse_issue(html)["body"] == "The real body."
+
+
+def test_parse_issue_body_is_empty_when_no_raw_element_matches():
+    html = ISSUE_BY_GLOBAL_ID.replace('id="issue-317-raw"', 'id="issue-999-raw"')
+    assert ForgejoClient._parse_issue(html)["body"] == ""
+
+
+def test_parse_issue_milestone_with_an_icon_inside_the_link():
+    """Forgejo 11 and below put an icon before the milestone title."""
+    html = (
+        '<meta property="og:title" content="Card">'
+        '<span class="index">#3</span>'
+        '<div id="issue-3-raw">body</div>'
+        '<a class="item muted sidebar-item-link" href="/o/r/milestone/7">'
+        '<svg viewBox="0 0 16 16" class="svg octicon-milestone"><path d="M7.75 0a.75.75"/></svg>'
+        "\n\t\t\t\t\tSprint 7\n\t\t\t\t</a>"
+    )
+    assert ForgejoClient._parse_issue(html)["milestone"] == {"id": 7, "title": "Sprint 7"}

@@ -44,3 +44,28 @@ jobs:
           name: dist
           path: dist/
           if-no-files-found: error
+
+  # Exercises the undocumented Forgejo web routes against real instances. The
+  # suite starts and stops the containers itself. These three releases cover
+  # every combination of version-specific behavior in compat.py: 1.20 matches
+  # all three quirks, 13 only the CSRF one, and 16 none.
+  integration:
+    runs-on: ubuntu-latest
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        forgejo: ["1.20", "13", "16"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v10.0.1
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --dev
+
+      - name: Run integration suite against Forgejo ${{ matrix.forgejo }}
+        run: uv run pytest -m integration --forgejo-version ${{ matrix.forgejo }}

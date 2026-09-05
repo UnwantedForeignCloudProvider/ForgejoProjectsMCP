@@ -16,6 +16,27 @@
 - When changing a route or parser, update its offline contract tests. Clearly
   document behavior that requires live verification against a throwaway Forgejo
   repository; never run destructive live tests without explicit authorization.
+- Routes, HTML patterns, form values and the CSRF strategy live in
+  `src/forgejo_projects_mcp/compat.py`, not inline in `client.py`. When Forgejo
+  changes one of them in a specific release, add a documented `Quirk` scoped to
+  the affected versions rather than branching on the version in the client, and
+  record the difference in `docs/forgejo-projects-automation-reference.md`.
+- The integration suite is self-contained and safe to run locally: it starts
+  throwaway containers itself. After touching a route or parser, run it against
+  the oldest and newest supported majors:
+
+  ```bash
+  uv run pytest -m integration --forgejo-version 1.20 --forgejo-version 16
+  ```
+- The offline and integration suites are paired: an offline test that *can* run
+  against a real instance has a live counterpart in the matching
+  `tests/integration/test_live_*.py`. When you add or change an offline test,
+  add or update its live counterpart too, unless the behavior genuinely cannot
+  be provoked on a real instance (a 429 response, an unreadable version string)
+  — say so in the test module's docstring when it cannot.
+- Prefer a live assertion that the fixture still matches reality over a richer
+  fixture. A hand-written fixture and the parser that reads it can agree with
+  each other long after both have stopped agreeing with Forgejo.
 - Never commit credentials, session state, `.env` contents, or sensitive values in
   logs, fixtures, examples, or documentation.
 

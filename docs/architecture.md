@@ -6,6 +6,7 @@
 MCP client ──stdio──> server.py ──> ForgejoClient ──Playwright HTTP──> Forgejo web routes
                            │              │
                            │              ├── session cookie cache
+                           │              ├── compat.Profile (routes, patterns, CSRF)
                            │              ├── HTML parsing / ID recovery
                            │              └── throttling and retries
                            │
@@ -21,6 +22,7 @@ Both interfaces use the same registered tool functions and the same module-level
 | `forgejo_projects_mcp.__init__` | Package entry point; imports environment loading first, re-exports `main` and `mcp`, and exposes the installed package version. |
 | `forgejo_projects_mcp._env` | Loads `.env` from the process working directory or a parent directory before configuration is read. |
 | `forgejo_projects_mcp.client` | Owns authentication, the Playwright request context, session persistence, internal Forgejo web requests, HTML parsing, ID resolution, throttling, retries, and resource cleanup. |
+| `forgejo_projects_mcp.compat` | Parses Forgejo versions and resolves the behavior profile for one: route templates, HTML pattern candidates, form value maps, and the CSRF strategy, plus the version-scoped quirks that override them. |
 | `forgejo_projects_mcp.server` | Defines the MCP server, lifecycle hook, tool functions, response shaping, and the exception-to-`ToolError` boundary. |
 | `forgejo_projects_mcp.cli` | Inspects MCP tool schemas, builds an argparse subcommand for each tool, parses JSON collection arguments, invokes tools in-process, and maps failures to exit code `1`. |
 
@@ -59,10 +61,15 @@ The first authenticated operation follows this path:
 1. `ForgejoClient.ensure()` validates the Forgejo URL.
 2. It starts Playwright if needed and opens an `APIRequestContext`.
 3. If `storage_state.json` exists, the cookies are loaded.
-4. `/user/settings` checks whether the session is still valid.
+4. `/user/settings` checks whether the session is still valid, and the same response body yields the instance version (and, on releases that need one, the session CSRF token).
 5. If not authenticated, the client validates the username/password and posts them to `/user/login`.
 6. A redirect response followed by a successful `/user/settings` check proves the session.
 7. Playwright storage state is written to the config directory.
+
+The probe is deliberately a rendered page rather than a lightweight endpoint:
+every Forgejo page embeds its own version, so the authentication check that
+precedes each request doubles as version detection and no separate version
+request is ever made.
 
 An optional credential-provider hook can recover an `AuthError` and retry this
 flow. Only an interactive `forgejo-projects-cli` invocation installs the hook;
@@ -93,6 +100,43 @@ Issues and milestones also use web pages. For a route that needs a global issue 
 
 The exact methods, paths, and observed Forgejo v15.0.7 behavior are recorded in the [automation reference](forgejo-projects-automation-reference.md).
 
+## Version adaptation
+
+The web routes this client drives are undocumented and unversioned, so their
+behavior differs between Forgejo releases. Rather than branching on version
+inside each operation, `compat.py` resolves one `Profile` per instance and the
+client reads everything version-dependent out of it:
+
+- **routes** — every internal path is a named template, rendered by
+  `profile.route(name, **params)`;
+- **patterns** — every scraped element is an *ordered tuple of candidate regular
+  expressions*, and the first that matches wins;
+- **form values** — such as the card-type map; and
+- **CSRF strategy** — `origin` or `token`.
+
+A profile is the base (newest verified) behavior with every matching `Quirk`
+applied in order, so supporting a release usually means adding one documented
+quirk rather than editing the client. Three are registered today, and they
+compose — Forgejo 1.20 matches all three:
+
+| Quirk | Applies to | Effect |
+|---|---|---|
+| `legacy-board-vocabulary` | Forgejo below 1.21 | Project columns were called *boards* in the markup (`board-column`, `board-label`, `board-card-cnt`), so the column patterns are replaced wholesale. |
+| `board-title-missing-from-page-title` | Forgejo below 10.0 | The board page `<title>` is only `owner/repo`, so just the project heading is trusted for the board title. |
+| `csrf-token-required` | Forgejo below 14.0 | Writes are rejected with HTTP 400 *Invalid CSRF token* unless they carry the session token, which those releases publish on every authenticated page. |
+
+Detection never becomes a single point of failure:
+
+- an unreadable or unrecognised version resolves to the newest verified
+  behavior instead of erroring; and
+- a write rejected for a missing CSRF token is retried once with a token, and
+  the session adopts token mode from then on — so an instance whose behavior
+  does not match its version still works.
+
+`forgejo_status` and `authenticate` report the detected version and the
+resolved profile, including whether the version is inside the range the
+integration suite exercises.
+
 ## Data and identity model
 
 The public tool API deliberately uses human-facing repository issue numbers. Forgejo's project move and attach routes require internal issue IDs, so the client translates at the boundary:
@@ -122,7 +166,9 @@ Project reads regroup the selected issue content under the original board column
 
 ## Testing architecture
 
-The test suite avoids a live Forgejo dependency. Fake Playwright contexts capture method, path, form, JSON payload, parameters, and response data. Tests cover:
+### Offline suite
+
+The default test suite avoids a live Forgejo dependency. Fake Playwright contexts capture method, path, form, JSON payload, parameters, and response data. Tests cover:
 
 - login success, bad credentials, session bounce, and cache writes;
 - exact HTTP method/path contracts for projects, columns, cards, issues, and milestones;
@@ -131,7 +177,70 @@ The test suite avoids a live Forgejo dependency. Fake Playwright contexts captur
 - MCP tool registration, schema validation, error signaling, and lifecycle cleanup; and
 - CLI schema generation, JSON argument parsing, output, and exit codes.
 
-When changing a route or parser, update the corresponding contract tests and perform a live throwaway-repository verification against the Forgejo version being supported.
+Version handling has its own offline coverage: version parsing and profile
+resolution in `tests/test_compat.py`, and the client behavior that follows from
+them — probe-time detection, CSRF header injection, rejection recovery and
+profile-driven parsing — in `tests/test_versioning.py`.
+
+### Integration suite
+
+`tests/integration/` runs the same operations against real Forgejo instances and
+is opt-in. It is self-contained: naming a version starts a throwaway container
+for it, waits for its health check, creates an admin, and seeds a repository
+with issues and a milestone before any test runs.
+
+```text
+--forgejo-version N ──> docker compose up (tests/composes/) ──> healthcheck
+                                    │
+                                    ├── admin user via `forgejo admin user create`
+                                    ├── repo + issues + milestone via the REST API
+                                    └── boards + columns + cards via ForgejoClient
+```
+
+Repositories, issues and milestones are seeded through Forgejo's documented REST
+API, which is stable across releases, so a seeding failure is never confused
+with a scraping failure. Projects have no API at all, so board fixtures go
+through the client under test.
+
+Every test runs once per requested version, which is how version-specific
+behavior is verified rather than assumed. See
+[Installation](installation.md#integration-testing).
+
+### The two suites are deliberately paired
+
+Every offline test that can be run against a real instance has a live
+counterpart, and the files mirror each other:
+
+| Offline | Live | What only the live one can prove |
+|---|---|---|
+| `test_client.py` (auth half) | `test_live_auth.py` | A real login is accepted, persisted and replayed; a real rejection recovers |
+| `test_client.py` (operations) | `test_live_client.py` | Recovered ids exist, filters narrow real results, failures carry real statuses |
+| `test_parsing.py` | `test_live_parsing.py` | The markup the fixtures imitate is the markup Forgejo still emits |
+| `test_tools.py` | `test_live_tools.py` | Each tool is wired to the client method it claims |
+| `test_cli.py` | `test_live_cli.py` | The installed console script works as a process, from environment to exit code |
+| `test_logging.py` | `test_live_logging.py` | Real passwords and real issue content stay out of the logs |
+| `test_compat.py`, `test_versioning.py` | `test_live_compat.py`, `test_live_session.py` | Each release enforces the CSRF rule and renders the markup its profile predicts |
+
+The division of labour is the point. The offline suite pins down logic that is
+hard to provoke on demand — a rate-limited response, a transport error mid-parse
+— and runs in seconds with no dependencies. The live suite proves the fixtures
+still describe reality, which is the failure mode a mocked suite cannot detect:
+a fixture and a parser can agree with each other long after both have stopped
+agreeing with Forgejo.
+
+Two things are covered offline only, because a stock instance will not produce
+them: rate-limit (429) retry and back-off, and a version string the client
+cannot read. Two are covered live only, because a fake transport cannot produce
+them either: a genuine mid-flight session expiry, and a real CSRF rejection.
+Timing is the one thing the live suite arranges — `expire_session_after_next_probe`
+logs the session out immediately after the client checks it — because the client
+verifies the session before every request, so an expiry set up beforehand would
+be caught by that check instead of by the request it is meant to interrupt.
+
+When changing a route or parser, update the corresponding contract tests, add a
+`compat` quirk if the behavior is version-specific, and run the integration
+suite against both the oldest and newest supported release
+(`--forgejo-version 1.20 --forgejo-version 16`).
 
 ## Limitations and risk
 

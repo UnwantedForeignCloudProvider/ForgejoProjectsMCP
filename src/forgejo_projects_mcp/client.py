@@ -10,17 +10,23 @@ Credentials come from the environment:
     FORGEJO_USERNAME
     FORGEJO_PASSWORD
 
-The interactive CLI may provide missing or replacement values in memory.
+The interactive CLI may provide missing or replacement values in memory, and the
+CLI also accepts them as arguments.
 
 The authenticated session (cookies) is persisted to
     <config>/forgejo_projects_mcp/storage_state.json
-(where <config> is $XDG_CONFIG_HOME or ~/.config, resolved per-OS) and reused
-across runs; it is refreshed automatically when it expires.
+and the non-secret connection settings (instance URL and username) to
+    <config>/forgejo_projects_mcp/config.json
+(where <config> is $XDG_CONFIG_HOME or ~/.config, resolved per-OS). Both are
+reused across runs, so after the first successful login no env vars are required;
+the session is refreshed automatically when it expires. The password is never
+persisted -- the cached session replaces it until it expires.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
@@ -39,6 +45,16 @@ from playwright.async_api import (
     Error as PlaywrightError,
 )
 
+from .compat import (
+    CSRF_TOKEN,
+    DEFAULT_PROFILE,
+    Profile,
+    Version,
+    detect_csrf_token,
+    detect_version,
+    profile_for,
+)
+
 logger = logging.getLogger("forgejo_projects_mcp.client")
 
 
@@ -55,6 +71,19 @@ def _default_config_dir() -> Path:
 
 CONFIG_DIR = _default_config_dir()
 STATE_FILE = CONFIG_DIR / "storage_state.json"
+CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+def _load_saved_config() -> dict[str, str]:
+    """Read persisted non-secret settings, tolerating a missing/corrupt file."""
+    try:
+        data = json.loads(CONFIG_FILE.read_text())
+    except (OSError, json.JSONDecodeError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, str)}
+
 
 _URL_ENV = "FORGEJO_URL"
 _USERNAME_ENV = "FORGEJO_USERNAME"
@@ -86,12 +115,10 @@ def _log_path(path: str) -> str:
         return "<invalid-path>"
     return path_only.replace("\r", "\\r").replace("\n", "\\n")
 
-# Matches a real user comment block (not timeline events) on an issue page.
-_COMMENT_BLOCK_RE = re.compile(
-    r'<div class="timeline-item comment" id="issuecomment-(\d+)">'
-    r'(.*?)(?=<div class="timeline-item|\Z)',
-    re.S,
-)
+# Body marker Forgejo returns when a write is rejected for a missing or stale
+# CSRF token. Recovering from it at runtime keeps an instance working when its
+# version could not be read, or when a proxy enforces CSRF on its behalf.
+_CSRF_REJECTED = "invalid csrf token"
 
 
 class AuthError(RuntimeError):
@@ -122,13 +149,24 @@ class ForgejoError(RuntimeError):
 
 class ForgejoClient:
     def __init__(self) -> None:
-        self.base_url = os.environ.get(_URL_ENV, "").rstrip("/")
-        self.username = os.environ.get(_USERNAME_ENV, "")
+        # Precedence: environment overrides the persisted config file; the
+        # password is a secret and is read from the environment only.
+        saved = _load_saved_config()
+        self.base_url = (
+            os.environ.get(_URL_ENV) or saved.get("base_url", "")
+        ).rstrip("/")
+        self.username = os.environ.get(_USERNAME_ENV) or saved.get("username", "")
         self.password = os.environ.get(_PASSWORD_ENV, "")
         self._credential_provider: CredentialProvider | None = None
         self._pw: Playwright | None = None
         self._ctx: APIRequestContext | None = None
         self._lock = asyncio.Lock()
+        # Instance version and the behavior profile derived from it. Both are
+        # established by the session probe (see _is_authenticated) and stay on
+        # the newest verified behavior until an instance says otherwise.
+        self._version: Version | None = None
+        self._profile: Profile = DEFAULT_PROFILE
+        self._csrf_token: str | None = None
         # Concurrency cap + steady-rate throttle, shared by all requests so that
         # bulk fan-out stays polite. (asyncio primitives bind to the running loop
         # on first use, so constructing them here is fine.)
@@ -166,6 +204,22 @@ class ForgejoClient:
         or None to preserve the error.
         """
         self._credential_provider = provider
+
+    def _persist_config(self) -> None:
+        """Persist non-secret connection settings (URL, username) for reuse.
+
+        Written alongside the session state so later runs need no env vars. The
+        password is never persisted -- the cached session cookie replaces it, and
+        it is re-supplied via env/CLI/prompt when the session expires.
+        """
+        try:
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            CONFIG_FILE.write_text(
+                json.dumps({"base_url": self.base_url, "username": self.username})
+            )
+            logger.debug("Persisted non-secret config to %s", CONFIG_FILE)
+        except OSError:  # persisting config is best-effort, never fatal
+            logger.debug("Could not persist config file", exc_info=True)
 
     @staticmethod
     def _raise_for_missing(values: tuple[tuple[str, str], ...]) -> None:
@@ -287,20 +341,99 @@ class ForgejoClient:
         await self._with_credential_recovery(self._ensure_once)
 
     async def _is_authenticated(self) -> bool:
+        """Probe the session, learning the instance version from the same reply.
+
+        The probe target is an ordinary rendered Forgejo page, so its body
+        carries the instance version -- and, on versions that need one, the
+        session's CSRF token. Reading them here makes the authentication check
+        that precedes every request double as version detection, instead of
+        costing a second round trip.
+        """
         if self._ctx is None:
             logger.debug("Authentication probe skipped context_present=false")
             return False
         loop = asyncio.get_running_loop()
         started = loop.time()
-        r = await self._ctx.get("/user/settings", max_redirects=0)
+        r = await self._ctx.get(self._route("auth_probe"), max_redirects=0)
         authenticated = r.status == 200
+        if authenticated:
+            self._absorb_page(await self._body(r))
         logger.debug(
-            "Authentication probe status=%d authenticated=%s elapsed_ms=%.1f",
+            "Authentication probe status=%d authenticated=%s version=%s "
+            "elapsed_ms=%.1f",
             r.status,
             authenticated,
+            self._version.short if self._version else "unknown",
             (loop.time() - started) * 1000,
         )
         return authenticated
+
+    @staticmethod
+    async def _body(r) -> str:
+        """Response body as text, tolerating a body that cannot be decoded."""
+        try:
+            return await r.text()
+        except Exception:  # reading a body opportunistically must never fail
+            logger.debug("Could not decode response body", exc_info=True)
+            return ""
+
+    def _absorb_page(self, html: str) -> None:
+        """Learn the version (and CSRF token) from a rendered Forgejo page."""
+        token = detect_csrf_token(html)
+        if token:
+            self._csrf_token = token
+        version = detect_version(html)
+        if version is None or version == self._version:
+            return
+        self._version = version
+        self._profile = profile_for(version)
+        logger.info(
+            "Forgejo version detected: %s (csrf_mode=%s, quirks=%s)",
+            version.short,
+            self._profile.csrf_mode,
+            ",".join(self._profile.quirks) or "none",
+        )
+
+    def _route(self, name: str, **params: Any) -> str:
+        """Render an internal web route as the detected version expects it."""
+        return self._profile.route(name, **params)
+
+    @property
+    def version(self) -> Version | None:
+        """The detected instance version, or ``None`` before the first probe."""
+        return self._version
+
+    @property
+    def profile(self) -> Profile:
+        """The behavior profile in force for the detected instance version."""
+        return self._profile
+
+    # ------------------------------------------------------------------ csrf
+    async def _csrf_token_for_write(self) -> str | None:
+        """The CSRF token to send with a write, if this version needs one."""
+        if self._profile.csrf_mode != CSRF_TOKEN:
+            return None
+        if self._csrf_token is None:
+            await self._refresh_csrf()
+        return self._csrf_token
+
+    async def _refresh_csrf(self, *, adopt_token_mode: bool = False) -> None:
+        """Re-read the session CSRF token from a rendered Forgejo page.
+
+        ``adopt_token_mode`` switches this session to token mode after a write
+        was rejected for a missing token, which is how an instance whose
+        version we could not read (or misjudged) is recovered.
+        """
+        if self._ctx is not None:
+            r = await self._ctx.get(self._route("auth_probe"), max_redirects=0)
+            self._absorb_page(await self._body(r))
+        if adopt_token_mode and self._profile.csrf_mode != CSRF_TOKEN:
+            logger.info(
+                "Forgejo rejected a write for a missing CSRF token; using token "
+                "mode for the rest of this session (version=%s)",
+                self._version.short if self._version else "unknown",
+            )
+            self._profile = self._profile.with_csrf_mode(CSRF_TOKEN)
 
     async def _login_locked(self) -> None:
         self._check_base_url()
@@ -311,7 +444,7 @@ class ForgejoClient:
         loop = asyncio.get_running_loop()
         started = loop.time()
         r = await self._ctx.post(
-            "/user/login",
+            self._route("login"),
             form={
                 "user_name": self.username,
                 "password": self.password,
@@ -335,6 +468,7 @@ class ForgejoClient:
             raise AuthError("Login succeeded but no valid session was established.")
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         await self._ctx.storage_state(path=str(STATE_FILE))
+        self._persist_config()
         logger.debug("Login completed session_state_persisted=true")
 
     async def _login_once(self, force: bool) -> None:
@@ -370,19 +504,31 @@ class ForgejoClient:
             "authenticated": True,
             "instance": self.base_url,
             "username": self.username,
+            "version": str(self._version) if self._version else None,
+            "compatibility": self._profile.describe(),
             "state_file": str(STATE_FILE),
+            "config_file": str(CONFIG_FILE),
         }
 
     async def status(self) -> dict[str, Any]:
         try:
             await self.ensure()
-            logger.debug("Authentication status check succeeded")
+            logger.debug(
+                "Authentication status check succeeded version=%s",
+                self._version.short if self._version else "unknown",
+            )
             return {
                 "authenticated": True,
                 "instance": self.base_url,
                 "username": self.username,
+                # The session probe reads the version out of the same response
+                # that proves the session, so this costs no extra request.
+                "version": str(self._version) if self._version else None,
+                "compatibility": self._profile.describe(),
                 "state_file": str(STATE_FILE),
                 "state_cached": STATE_FILE.exists(),
+                "config_file": str(CONFIG_FILE),
+                "config_cached": CONFIG_FILE.exists(),
             }
         except (AuthError, ForgejoError) as e:
             logger.debug(
@@ -390,7 +536,12 @@ class ForgejoClient:
                 type(e).__name__,
                 getattr(e, "code", None),
             )
-            return {"authenticated": False, "error": str(e), "instance": self.base_url}
+            return {
+                "authenticated": False,
+                "error": str(e),
+                "instance": self.base_url,
+                "version": str(self._version) if self._version else None,
+            }
 
     async def close(self) -> None:
         """Best-effort teardown of the request context and Playwright driver.
@@ -429,6 +580,7 @@ class ForgejoClient:
         follow: bool = True,
         _retry: bool = True,
         _rate_retry: int = _MAX_RATE_RETRIES,
+        _csrf_retry: bool = True,
     ):
         await self.ensure()
         assert self._ctx is not None
@@ -443,6 +595,15 @@ class ForgejoClient:
             kwargs["params"] = params
         if not follow:
             kwargs["max_redirects"] = 0
+        # Versions predating Forgejo's Origin-based CSRF check reject a write
+        # unless it carries the session's token (see compat.QUIRKS).
+        if method.upper() not in ("GET", "HEAD"):
+            csrf = await self._csrf_token_for_write()
+            if csrf:
+                kwargs["headers"] = {
+                    **kwargs.get("headers", {}),
+                    "X-Csrf-Token": csrf,
+                }
         logger.debug(
             "HTTP request method=%s path=%s follow_redirects=%s param_keys=%s "
             "form_fields=%s json_payload=%s auth_retry_available=%s "
@@ -510,6 +671,7 @@ class ForgejoClient:
             return await self._request(
                 method, path, form=form, json=json, params=params,
                 follow=follow, _retry=_retry, _rate_retry=_rate_retry - 1,
+                _csrf_retry=_csrf_retry,
             )
         if r.status in (429, 503):
             logger.debug(
@@ -532,11 +694,32 @@ class ForgejoClient:
             )
             return await self._request(
                 method, path, form=form, json=json, params=params,
-                follow=follow, _retry=False,
+                follow=follow, _retry=False, _csrf_retry=_csrf_retry,
             )
         if bounced:
             logger.debug(
                 "Authentication retry already used method=%s path=%s", method, safe_path
+            )
+
+        # A write rejected for CSRF: pick up a token and retry once. This is
+        # the safety net for an instance whose version could not be read, or
+        # whose behavior does not match what its version implies.
+        if (
+            r.status == 400
+            and _csrf_retry
+            and method.upper() not in ("GET", "HEAD")
+            and _CSRF_REJECTED in (await self._body(r)).lower()
+        ):
+            logger.info(
+                "CSRF rejection on %s %s; retrying with a session token",
+                method,
+                safe_path,
+            )
+            await self._refresh_csrf(adopt_token_mode=True)
+            return await self._request(
+                method, path, form=form, json=json, params=params,
+                follow=follow, _retry=_retry, _rate_retry=_rate_retry,
+                _csrf_retry=False,
             )
 
         if not follow and r.status in _REDIRECTS:
@@ -598,18 +781,13 @@ class ForgejoClient:
         )
         return body
 
-    # ------------------------------------------------------------- utilities
-    @staticmethod
-    def _repo_base(owner: str, repo: str) -> str:
-        return f"/{owner}/{repo}"
-
     # ---------------------------------------------------------- repositories
     async def list_repositories(
         self, query: str = "", limit: int = 50, page: int = 1
     ) -> list[dict[str, Any]]:
         r = await self._request(
             "GET",
-            "/repo/search",
+            self._route("repo_search"),
             params={"q": query, "limit": str(limit), "page": str(page)},
             follow=True,
         )
@@ -641,11 +819,11 @@ class ForgejoClient:
 
     # --------------------------------------------------------------- parsing
     @staticmethod
-    def _parse_projects_list(html: str) -> list[dict[str, Any]]:
+    def _parse_projects_list(
+        html: str, profile: Profile = DEFAULT_PROFILE
+    ) -> list[dict[str, Any]]:
         projects: dict[int, str] = {}
-        for m in re.finditer(
-            r'href="[^"]*/projects/(\d+)"[^>]*>\s*([^<]+?)\s*</a>', html
-        ):
+        for m in profile.finditer("projects_link", html):
             pid = int(m.group(1))
             title = unescape(m.group(2).strip())
             if title and (pid not in projects or len(title) > len(projects[pid])):
@@ -657,34 +835,34 @@ class ForgejoClient:
         return result
 
     @staticmethod
-    def _parse_board(html: str) -> dict[str, Any]:
-        title_m = re.search(r"<title>([^<]+)</title>", html)
-        board_title = unescape(title_m.group(1).split(" - ")[0].strip()) if title_m else ""
+    def _parse_board(
+        html: str, profile: Profile = DEFAULT_PROFILE
+    ) -> dict[str, Any]:
+        # The profile's candidates capture the board title directly, so no
+        # suffix stripping is needed here (see compat._PATTERNS["board_title"]).
+        title_m = profile.search("board_title", html)
+        board_title = unescape(title_m.group(1).strip()) if title_m else ""
 
         columns: list[dict[str, Any]] = []
         # Split at each *real* column container. The class token must be exactly
         # "project-column" (followed by a quote or space) so we don't also match
         # project-column-header / project-column-title / new-project-column-modal.
-        parts = re.split(r'(<div class="project-column[ "][^>]*>)', html)
+        parts = profile.split("board_column_open", html)
         for i in range(1, len(parts), 2):
             opening = parts[i]
             chunk = parts[i + 1] if i + 1 < len(parts) else ""
-            id_m = re.search(r'data-id="(\d+)"', opening)
+            id_m = profile.search("board_column_id", opening)
             if not id_m:
                 continue
             col_id = int(id_m.group(1))
-            tt = re.search(
-                r'project-column-title-label[^>]*>\s*([^<]+?)\s*<', chunk
-            )
+            tt = profile.search("board_column_title", chunk)
             col_title = unescape(tt.group(1).strip()) if tt else ""
             cards = []
-            for cm in re.finditer(
-                r'data-issue="(\d+)"(.*?)(?=data-issue="|\Z)', chunk, re.DOTALL
-            ):
+            for cm in profile.finditer("board_card", chunk):
                 issue_id = int(cm.group(1))
                 block = cm.group(2)
-                num_m = re.search(r'/issues/(\d+)"', block)
-                title_m2 = re.search(r'/issues/\d+"[^>]*>\s*([^<]+?)\s*</a>', block)
+                num_m = profile.search("board_card_number", block)
+                title_m2 = profile.search("board_card_title", block)
                 cards.append(
                     {
                         "issue_id": issue_id,
@@ -705,8 +883,10 @@ class ForgejoClient:
 
     async def resolve_issue_id(self, owner: str, repo: str, number: int) -> int:
         """Map a repo-local issue number to its global issue id."""
-        html = await self._get_text(f"{self._repo_base(owner, repo)}/issues/{number}")
-        m = re.search(r'data-issue-id="(\d+)"', html)
+        html = await self._get_text(
+            self._route("issue", owner=owner, repo=repo, number=number)
+        )
+        m = self._profile.search("issue_id", html)
         if not m:
             raise ForgejoError(
                 f"Could not resolve issue #{number} in {owner}/{repo}.",
@@ -720,9 +900,9 @@ class ForgejoClient:
         self, owner: str, repo: str, state: str
     ) -> list[dict[str, Any]]:
         html = await self._get_text(
-            f"{self._repo_base(owner, repo)}/projects", params={"state": state}
+            self._route("projects", owner=owner, repo=repo), params={"state": state}
         )
-        return self._parse_projects_list(html)
+        return self._parse_projects_list(html, self._profile)
 
     async def list_projects(
         self, owner: str, repo: str, state: str = "open"
@@ -746,10 +926,10 @@ class ForgejoClient:
         description: str = "",
         card_type: str = "text",
     ) -> dict[str, Any]:
-        ct = {"text": "1", "images_and_text": "2"}.get(card_type, str(card_type))
+        ct = self._profile.card_types.get(card_type, str(card_type))
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/new",
+            self._route("project_new", owner=owner, repo=repo),
             form={
                 "redirect": "",
                 "title": title,
@@ -769,9 +949,9 @@ class ForgejoClient:
         self, owner: str, repo: str, project_id: int
     ) -> dict[str, Any]:
         html = await self._get_text(
-            f"{self._repo_base(owner, repo)}/projects/{project_id}"
+            self._route("project", owner=owner, repo=repo, project_id=project_id)
         )
-        board = self._parse_board(html)
+        board = self._parse_board(html, self._profile)
         board["id"] = project_id
         return board
 
@@ -786,11 +966,11 @@ class ForgejoClient:
     ) -> dict[str, Any]:
         # Read current values from the edit form for any field left unset.
         html = await self._get_text(
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/edit"
+            self._route("project_edit", owner=owner, repo=repo, project_id=project_id)
         )
-        cur_title = re.search(r'name="title"[^>]*value="([^"]*)"', html)
-        cur_ct = re.search(r'name="card_type"[^>]*value="([^"]*)"', html)
-        ct_map = {"text": "1", "images_and_text": "2"}
+        cur_title = self._profile.search("project_edit_title", html)
+        cur_ct = self._profile.search("project_edit_card_type", html)
+        ct_map = self._profile.card_types
         new_title = title if title is not None else (cur_title.group(1) if cur_title else "")
         if card_type:
             new_ct = ct_map.get(card_type, card_type)
@@ -804,7 +984,7 @@ class ForgejoClient:
         }
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/edit",
+            self._route("project_edit", owner=owner, repo=repo, project_id=project_id),
             form=form,
             follow=False,
         )
@@ -813,9 +993,12 @@ class ForgejoClient:
     async def _project_action(
         self, owner: str, repo: str, project_id: int, action: str
     ) -> dict[str, Any]:
+        """POST a project state change; ``action`` names both route and result."""
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/{action}",
+            self._route(
+                f"project_{action}", owner=owner, repo=repo, project_id=project_id
+            ),
             form={},
             follow=False,
         )
@@ -830,7 +1013,9 @@ class ForgejoClient:
     async def delete_project(self, owner, repo, project_id):
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/delete",
+            self._route(
+                "project_delete", owner=owner, repo=repo, project_id=project_id
+            ),
             form={},
             follow=False,
         )
@@ -842,7 +1027,7 @@ class ForgejoClient:
     ) -> dict[str, Any]:
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}",
+            self._route("column_new", owner=owner, repo=repo, project_id=project_id),
             form={"title": title, "color": color},
             follow=False,
         )
@@ -861,7 +1046,13 @@ class ForgejoClient:
             form["color"] = color
         await self._request(
             "PUT",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/{column_id}",
+            self._route(
+                "column",
+                owner=owner,
+                repo=repo,
+                project_id=project_id,
+                column_id=column_id,
+            ),
             form=form,
             follow=False,
         )
@@ -871,7 +1062,13 @@ class ForgejoClient:
         try:
             await self._request(
                 "DELETE",
-                f"{self._repo_base(owner, repo)}/projects/{project_id}/{column_id}",
+                self._route(
+                    "column",
+                    owner=owner,
+                    repo=repo,
+                    project_id=project_id,
+                    column_id=column_id,
+                ),
                 follow=False,
             )
         except ForgejoError as e:
@@ -888,7 +1085,13 @@ class ForgejoClient:
     ) -> dict[str, Any]:
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/{column_id}/default",
+            self._route(
+                "column_default",
+                owner=owner,
+                repo=repo,
+                project_id=project_id,
+                column_id=column_id,
+            ),
             form={},
             follow=False,
         )
@@ -907,7 +1110,7 @@ class ForgejoClient:
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/issues/projects",
+            self._route("issue_projects", owner=owner, repo=repo),
             form={"id": str(project_id), "issue_ids": ",".join(map(str, ids))},
             follow=False,
         )
@@ -919,7 +1122,7 @@ class ForgejoClient:
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/issues/projects",
+            self._route("issue_projects", owner=owner, repo=repo),
             form={"id": "0", "issue_ids": ",".join(map(str, ids))},
             follow=False,
         )
@@ -936,7 +1139,13 @@ class ForgejoClient:
         }
         r = await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/projects/{project_id}/{column_id}/move",
+            self._route(
+                "column_move",
+                owner=owner,
+                repo=repo,
+                project_id=project_id,
+                column_id=column_id,
+            ),
             json=payload,
             follow=False,
         )
@@ -974,32 +1183,44 @@ class ForgejoClient:
             form["assignee_ids"] = ",".join(map(str, assignee_ids))
         r = await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/issues/new",
+            self._route("issue_new", owner=owner, repo=repo),
             form=form,
             follow=False,
         )
-        # Forgejo replies 200 with JSON {"redirect": ".../issues/N"}.
         number = None
-        try:
-            data = await r.json()
-            num_m = re.search(r"/issues/(\d+)", data.get("redirect", ""))
+        for source, raw in await self._created_issue_paths(r):
+            num_m = self._profile.search("created_issue_number", raw)
             if num_m:
                 number = int(num_m.group(1))
-            logger.debug(
-                "Parsed create-issue response format=json issue_number_present=%s",
-                number is not None,
-            )
-        except Exception as exc:
-            logger.debug(
-                "Create-issue response parsing failed error_type=%s",
-                type(exc).__name__,
-            )
+                logger.debug("Parsed create-issue response format=%s", source)
+                break
+        if number is None:
+            logger.debug("Create-issue response carried no issue number")
         return {"created": True, "number": number, "title": title}
+
+    @staticmethod
+    async def _created_issue_paths(r) -> list[tuple[str, str]]:
+        """Strings from a new-issue response that may hold the issue path.
+
+        The number arrives in one of two shapes depending on the Forgejo
+        release: newer versions answer 200 with JSON ``{"redirect":
+        ".../issues/N"}``, while Forgejo below 1.21 answers 303 with that path
+        in the ``Location`` header. Both are offered, in that order.
+        """
+        candidates: list[tuple[str, str]] = []
+        try:
+            body = await r.json()
+            if isinstance(body, dict):
+                candidates.append(("json", str(body.get("redirect", ""))))
+        except Exception:  # a non-JSON body just means the redirect shape
+            logger.debug("Create-issue response is not JSON", exc_info=True)
+        candidates.append(("location", r.headers.get("location", "")))
+        return candidates
 
     async def delete_issue(self, owner, repo, number) -> dict[str, Any]:
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/issues/{number}/delete",
+            self._route("issue_delete", owner=owner, repo=repo, number=number),
             form={},
             follow=False,
         )
@@ -1007,37 +1228,61 @@ class ForgejoClient:
 
     # --------------------------------------------------- reading issue content
     @staticmethod
-    def _extract_raw(html: str, base_id: str) -> str:
+    def _extract_raw(
+        html: str, base_id: str, profile: Profile = DEFAULT_PROFILE
+    ) -> str:
         """Return the raw (markdown) text from a Forgejo ``#<id>-raw`` element."""
-        m = re.search(rf'id="{re.escape(base_id)}-raw"[^>]*>(.*?)</div>', html, re.S)
+        m = profile.search("issue_raw", html, id=base_id)
         return unescape(m.group(1).strip()) if m else ""
 
     @staticmethod
-    def _parse_issue(html: str) -> dict[str, Any]:
-        num_m = re.search(r'<span class="index">#(\d+)</span>', html)
+    def _issue_body(
+        html: str, number: int | None, profile: Profile = DEFAULT_PROFILE
+    ) -> str:
+        """The issue's own markdown body, from whichever id keys its element.
+
+        Forgejo keys the body's raw element by the issue's *global* id, which
+        equals the repo-local number only in the first repository an instance
+        ever creates -- everywhere else the two diverge, and keying by the
+        number silently yields an empty body. The number is still tried as a
+        fallback so a release that keys it differently keeps working.
+        """
+        candidates = []
+        id_m = profile.search("issue_id", html)
+        if id_m:
+            candidates.append(f"issue-{id_m.group(1)}")
+        if number is not None:
+            candidates.append(f"issue-{number}")
+        for base_id in candidates:
+            body = ForgejoClient._extract_raw(html, base_id, profile)
+            if body:
+                return body
+        return ""
+
+    @staticmethod
+    def _parse_issue(
+        html: str, profile: Profile = DEFAULT_PROFILE
+    ) -> dict[str, Any]:
+        num_m = profile.search("issue_number", html)
         number = int(num_m.group(1)) if num_m else None
-        title_m = re.search(r'<meta property="og:title" content="([^"]*)"', html)
+        title_m = profile.search("issue_title", html)
         title = unescape(title_m.group(1)) if title_m else ""
-        state = (
-            "closed"
-            if re.search(r'issue-state-label"[^>]*>\s*<svg[^>]*octicon-issue-closed', html)
-            else "open"
-        )
-        body = ForgejoClient._extract_raw(html, f"issue-{number}") if number else ""
+        state = "closed" if profile.search("issue_closed", html) else "open"
+        body = ForgejoClient._issue_body(html, number, profile)
         milestone = None
-        ms_m = re.search(
-            r'''href=["'][^"']*/milestone/(\d+)["'][^>]*>\s*([^<]+?)\s*</a>''', html
-        )
+        ms_m = profile.search("issue_milestone", html)
         if ms_m:
             milestone = {"id": int(ms_m.group(1)), "title": unescape(ms_m.group(2).strip())}
         comments = []
-        for cm in _COMMENT_BLOCK_RE.finditer(html):
+        for cm in profile.finditer("comment_block", html):
             cid, block = cm.group(1), cm.group(2)
-            author_m = re.search(r'class="author[^"]*"[^>]*>\s*([^<]+?)\s*</a>', block)
+            author_m = profile.search("comment_author", block)
             comments.append(
                 {
                     "author": author_m.group(1).strip() if author_m else None,
-                    "body": ForgejoClient._extract_raw(html, f"issuecomment-{cid}"),
+                    "body": ForgejoClient._extract_raw(
+                        html, f"issuecomment-{cid}", profile
+                    ),
                 }
             )
         result = {
@@ -1061,8 +1306,10 @@ class ForgejoClient:
 
     async def read_issue(self, owner, repo, number: int) -> dict[str, Any]:
         """Full content of one issue/card: title, state, body, milestone, comments."""
-        html = await self._get_text(f"{self._repo_base(owner, repo)}/issues/{number}")
-        data = self._parse_issue(html)
+        html = await self._get_text(
+            self._route("issue", owner=owner, repo=repo, number=number)
+        )
+        data = self._parse_issue(html, self._profile)
         if data["number"] is None:
             data["number"] = number
         return data
@@ -1120,8 +1367,12 @@ class ForgejoClient:
             params["project"] = str(project)
         if milestone is not None:
             params["milestone"] = str(milestone)
-        html = await self._get_text(f"{self._repo_base(owner, repo)}/issues", params=params)
-        numbers = sorted({int(x) for x in re.findall(r"/issues/(\d+)", html)})
+        html = await self._get_text(
+            self._route("issues", owner=owner, repo=repo), params=params
+        )
+        numbers = sorted(
+            {int(m.group(1)) for m in self._profile.finditer("issue_link_number", html)}
+        )
         logger.debug(
             "Parsed filtered issue list input_chars=%d issues=%d", len(html), len(numbers)
         )
@@ -1274,7 +1525,13 @@ class ForgejoClient:
             }
             await self._request(
                 "POST",
-                f"{self._repo_base(owner, repo)}/projects/{project_id}/{col}/move",
+                self._route(
+                    "column_move",
+                    owner=owner,
+                    repo=repo,
+                    project_id=project_id,
+                    column_id=col,
+                ),
                 json=payload,
                 follow=False,
             )
@@ -1287,11 +1544,11 @@ class ForgejoClient:
 
     # ------------------------------------------------------------ milestones
     @staticmethod
-    def _parse_milestones(html: str) -> list[dict[str, Any]]:
+    def _parse_milestones(
+        html: str, profile: Profile = DEFAULT_PROFILE
+    ) -> list[dict[str, Any]]:
         out: dict[int, str] = {}
-        for m in re.finditer(
-            r'href="[^"]*/milestone/(\d+)"[^>]*>\s*([^<]+?)\s*</a>', html
-        ):
+        for m in profile.finditer("milestone_link", html):
             mid = int(m.group(1))
             title = unescape(m.group(2).strip())
             if title and (mid not in out or len(title) > len(out[mid])):
@@ -1304,9 +1561,9 @@ class ForgejoClient:
 
     async def _list_milestones_state(self, owner, repo, state):
         html = await self._get_text(
-            f"{self._repo_base(owner, repo)}/milestones", params={"state": state}
+            self._route("milestones", owner=owner, repo=repo), params={"state": state}
         )
-        return self._parse_milestones(html)
+        return self._parse_milestones(html, self._profile)
 
     async def list_milestones(self, owner, repo, state: str = "open"):
         self._check_state(state)
@@ -1325,7 +1582,7 @@ class ForgejoClient:
     ) -> dict[str, Any]:
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/milestones/new",
+            self._route("milestone_new", owner=owner, repo=repo),
             form={"title": title, "content": description, "deadline": deadline},
             follow=False,
         )
@@ -1345,16 +1602,24 @@ class ForgejoClient:
         }
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/milestones/{milestone_id}/edit",
+            self._route(
+                "milestone_edit", owner=owner, repo=repo, milestone_id=milestone_id
+            ),
             form=form,
             follow=False,
         )
         return {"updated": True, "milestone_id": milestone_id}
 
     async def _milestone_action(self, owner, repo, milestone_id, action):
+        """POST a milestone state change; ``action`` names route and result."""
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/milestones/{milestone_id}/{action}",
+            self._route(
+                f"milestone_{action}",
+                owner=owner,
+                repo=repo,
+                milestone_id=milestone_id,
+            ),
             form={"id": str(milestone_id)},
             follow=False,
         )
@@ -1371,7 +1636,7 @@ class ForgejoClient:
         # (NOT /milestones/{id}/delete, which 200s but does nothing).
         await self._request(
             "POST",
-            f"{self._repo_base(owner, repo)}/milestones/delete",
+            self._route("milestone_delete", owner=owner, repo=repo),
             form={"id": str(milestone_id)},
             follow=False,
         )

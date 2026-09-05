@@ -7,7 +7,8 @@ milestones are addressed by numeric **id**.
 
 ## Session & discovery
 
-- `forgejo_status` — check authentication.
+- `forgejo_status` — check authentication, and report the instance version and
+  the compatibility profile in force for it.
 - `authenticate(force=False)` — log in / refresh the cached session.
 - `list_repositories(query, limit, page)` — repos the user can access.
 

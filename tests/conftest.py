@@ -1,7 +1,11 @@
-"""Shared fakes for offline tests.
+"""Shared fakes for offline tests, plus the integration suite's CLI options.
 
 The client talks to Playwright's APIRequestContext. These fakes stand in for it
 so the whole test suite runs with no network, no browser and no credentials.
+
+The ``--forgejo-*`` options belong to the opt-in integration suite (see
+tests/integration/), but pytest only accepts new options from an initial
+conftest, so they are registered here.
 """
 
 from __future__ import annotations
@@ -12,6 +16,27 @@ from collections.abc import Callable
 import pytest
 
 from forgejo_projects_mcp.client import ForgejoClient
+
+
+def pytest_addoption(parser) -> None:
+    """Register the integration suite's instance-selection options."""
+    group = parser.getgroup("forgejo")
+    group.addoption(
+        "--forgejo-version",
+        action="append",
+        default=[],
+        metavar="VERSION",
+        help=(
+            "Forgejo image tag to run the integration suite against; repeat for "
+            "several versions (e.g. --forgejo-version 14 --forgejo-version 16)."
+        ),
+    )
+    group.addoption(
+        "--forgejo-keep",
+        action="store_true",
+        default=False,
+        help="Leave started Forgejo containers running after the session.",
+    )
 
 
 class FakeResponse:
@@ -110,4 +135,5 @@ def tmp_state(monkeypatch, tmp_path):
 
     monkeypatch.setattr(client_mod, "CONFIG_DIR", tmp_path)
     monkeypatch.setattr(client_mod, "STATE_FILE", tmp_path / "storage_state.json")
+    monkeypatch.setattr(client_mod, "CONFIG_FILE", tmp_path / "config.json")
     return tmp_path

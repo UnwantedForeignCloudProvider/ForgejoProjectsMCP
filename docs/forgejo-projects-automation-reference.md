@@ -5,9 +5,16 @@ query parameter, response shape, DOM anchor, and page-specific behavior on
 which `forgejo_projects_mcp` depends.
 
 The contracts below were audited against
-`src/forgejo_projects_mcp/client.py` on **2026-09-04**. The original route
-discovery was performed against **Forgejo v15.0.7**. These routes are internal,
-unversioned Forgejo web interfaces and may change between Forgejo releases.
+`src/forgejo_projects_mcp/client.py` on **2026-09-05** and live-verified against
+**every published Forgejo release from 1.20 through 16** by the integration
+suite (1.20, 1.21, then majors 7 to 16 — Forgejo's numbering skips 2 to 6). The original
+route discovery was performed against **Forgejo v15.0.7**. These routes are
+internal, unversioned Forgejo web interfaces and may change between Forgejo
+releases.
+
+Where behavior differs by version, the difference is recorded here *and*
+encoded as a quirk in `src/forgejo_projects_mcp/compat.py`, so the client adapts
+instead of failing. See [Architecture](architecture.md#version-adaptation).
 
 When code starts depending on another Forgejo page detail, update this file in
 the same change. Do not leave the only record of a route, field name, selector,
@@ -23,6 +30,8 @@ Evidence in this document has three levels:
 
 - **Implemented and offline-tested** means the current client uses the contract
   and the test suite checks it with a fake Forgejo request context.
+- **Live-verified** means the integration suite exercises it against a real
+  instance of every supported release (1.20, 1.21, and majors 7 through 16).
 - **Historically live-verified** means the original investigation exercised it
   against Forgejo v15.0.7.
 - **Observed or inferred only** means the current client does not use it; do not
@@ -68,6 +77,22 @@ receive `state=all` directly.
 | Check session | GET | `/user/settings` | HTTP 200 means authenticated; redirects are disabled |
 | Log in | POST | `/user/login` | `user_name`, `password`, `remember=on` |
 
+The session check reads its response *body* as well as its status, because
+every rendered Forgejo page carries the instance version and, on releases that
+need one, the session CSRF token. One request therefore establishes all three.
+The markers, in the order the client tries them:
+
+| Value | HTML contract | Verified on |
+|---|---|---|
+| Version | `assetVersionEncoded: encodeURIComponent('<version>')` in `window.config` | 1.20-16 |
+| Version (fallback) | `/assets/js/index.js?v=<version>` on the page's own script tag | 1.20-16 |
+| Version (fallback) | `Version:` followed by a link in the footer | admins, when the footer version is shown |
+| CSRF token | `csrfToken: '<token>'` in `window.config` | 1.20-13 |
+| CSRF token (fallback) | `<input name="_csrf" value="<token>">` in any form | 1.20-13 |
+
+The version string appears as `16.0.3~gitea-1.22.0` in HTML and
+`16.0.3+gitea-1.22.0` over the REST API; both parse to the same version.
+
 Login redirects are disabled. Status 301, 302, 303, 307, or 308 is treated as
 the initial success signal; a re-rendered HTTP 200 is treated as invalid
 credentials. The client then checks `/user/settings` again before accepting the
@@ -78,10 +103,33 @@ The session is stored as Playwright storage state at
 `Path.home()/.config/forgejo_projects_mcp/` when `XDG_CONFIG_HOME` is unset.
 The session cookie observed on v15.0.7 was `i_like_gitea` with `HttpOnly`.
 
-Every request context sends `Origin: {FORGEJO_URL}`. The implemented write
-requests do not send an explicit `_csrf` field. Writes without `_csrf` were
-historically live-verified on v15.0.7; this is version-specific behavior and
-does not establish how newer Forgejo versions implement CSRF protection.
+Every request context sends `Origin: {FORGEJO_URL}`. **CSRF handling is
+version-specific**, and this is the largest behavioral difference found across
+supported releases:
+
+| Versions | Behavior | Client |
+|---|---|---|
+| 14.0 and newer | A matching `Origin` header is accepted; no token is needed | Sends no token (`csrf_mode: origin`) |
+| 9.0 to 13.x | A write carrying only `Origin` is rejected with HTTP 400 and the body `Invalid CSRF token.` | Sends `X-Csrf-Token` on every non-GET (`csrf_mode: token`) |
+| Below 9.0 | A write carrying only `Origin` is **silently discarded**: the response is HTTP 303 to `/` with an empty body, and nothing is written | Sends `X-Csrf-Token` on every non-GET (`csrf_mode: token`) |
+
+Both `X-Csrf-Token` and an `_csrf` form field are accepted by the versions that
+require a token; the client uses the header so JSON bodies (the card-move
+route) are covered by the same mechanism.
+
+Detection is not a single point of failure: a write rejected with HTTP 400 and
+an `Invalid CSRF token` body is retried once with a token, and the session
+switches to token mode from then on. That covers an instance whose version
+cannot be read or whose behavior does not match its version.
+
+**That recovery cannot work below Forgejo 9.0.** Those releases answer a
+token-less write with the same `303` a successful write returns, so a dropped
+write is indistinguishable from a completed one and there is nothing to detect.
+The normal path is unaffected — the profile selects token mode from the version
+before any write is attempted — but an instance below 9.0 whose version the
+client cannot read at all will accept writes that do nothing. Anyone running one
+should confirm `forgejo_status` reports a version rather than `null`.
+
 Personal access tokens were not accepted by these internal web routes in that
 investigation.
 
@@ -185,19 +233,45 @@ the original investigation.
 
 The current parser depends on these anchors:
 
-| Value | HTML contract |
-|---|---|
-| Board title | First `<title>` text, truncated before the first ` - ` |
-| Real column | Opening tag begins `<div class="project-column...` where the exact `project-column` token is followed by a quote or space |
-| Column ID | `data-id="{column_id}"` on that opening tag |
-| Column title | Direct text under an element whose class contains `project-column-title-label` |
-| Card/global issue ID | `data-issue="{issue_id}"` |
-| Card issue number | `/issues/{issue_number}` link within the card block |
-| Card title | Direct text of that issue link |
+| Value | HTML contract | Versions |
+|---|---|---|
+| Board title | Text of the project heading `<h2>`: class `tw-mb-0 tw-flex-1 tw-break-anywhere` (10-16), `gt-mb-0` (1.21-9), or `project-title` (1.20) | 1.20-16 |
+| Real column | `<div class="...">` carrying `project-column` as a whole class token (optionally after other classes, and followed by a space or the closing quote) | 1.21-16 |
+| Real column | The same shape with the class token `board-column` | 1.20 |
+| Column ID | `data-id="{column_id}"` on that opening tag | 1.20-16 |
+| Column title | Direct text under an element whose class contains `project-column-title-label` | 7-16 |
+| Column title | Text inside `project-column-title` (1.21) or `board-label` (1.20), after the nested issue-count badge | 1.20-1.21 |
+| Card/global issue ID | `data-issue="{issue_id}"` | 1.20-16 |
+| Card issue number | `/issues/{issue_number}` link within the card block | 1.20-16 |
+| Card title | Direct text of that issue link | 1.20-16 |
 
-Matching the exact `project-column` token prevents elements such as
+Matching `project-column` as a whole class token prevents elements such as
 `project-column-header`, `project-column-title`, and
-`new-project-column-modal` from becoming fake columns.
+`new-project-column-modal` from becoming fake columns. The token may be
+preceded by other classes: Forgejo 1.21 renders `class="ui segment
+project-column"`, while 7 and newer render `class="project-column"`.
+
+**Forgejo 1.20 predates the rename of project "boards" to "columns"** and has no
+`project-column` markup at all: a column is `<div class="ui segment
+board-column" data-id="N">`, its header is `board-column-header`, and its title
+sits in a `board-label` element after a `board-card-cnt` badge. The
+`legacy-board-vocabulary` quirk swaps in those patterns below 1.21. The hidden
+new-column form is named for the same vocabulary there (`new-board-modal`
+rather than `new-project-column-modal`).
+
+On the 1.x line the default destination is rendered as an ordinary column
+titled *Uncategorized* with `data-id="0"`, so a parsed board on those releases
+contains a column whose id is `0`. Column ids are therefore non-negative rather
+than positive, and `0` is a value the move routes accept.
+
+The board title is read from the project heading rather than the page
+`<title>`, because the two disagree by version: Forgejo 10 and newer render
+`<title>Board name - owner/repo - ...</title>`, while **1.20 through 9 render
+only `<title>owner/repo - ...</title>`** and never name the board there. The
+heading is always present; only its class changed, tracking Forgejo's move from
+the `gt-` utility prefix to Tailwind's `tw-`. The `<title>` forms remain as ordered
+fallbacks for 10 and newer; the `board-title-missing-from-page-title` quirk
+removes them below 10, where they would silently return the repository name.
 
 The parser is regex-based and assumes the relevant double-quoted attributes
 and their current ordering. Nested or substantially changed markup can break
@@ -277,11 +351,18 @@ request per column. Ordering is relative to each destination group.
 when their lists are empty. Project and milestone fields are omitted when they
 are `null`.
 
-Forgejo v15.0.7 returned HTTP 200 with JSON resembling
-`{"redirect":"/.../issues/{issue_number}"}` after issue creation. The client
-parses the issue number from that redirect. If the body is not usable JSON or
-does not contain that path, creation is still reported as successful but the
-returned issue number is `null`.
+The new issue's number arrives in one of **two shapes, depending on the
+release**:
+
+| Versions | Response |
+|---|---|
+| 1.21 and newer | HTTP 200 with JSON `{"redirect":"/.../issues/{issue_number}"}` |
+| 1.20 | HTTP 303 with `Location: /.../issues/{issue_number}` and an empty body |
+
+The client tries the JSON redirect first and falls back to the `Location`
+header, so both are handled without needing to know the version. If neither
+carries the path, creation is still reported as successful but the returned
+issue number is `null`.
 
 Permanent issue deletion is distinct from detaching a project card.
 
@@ -316,7 +397,7 @@ The parser for `GET /{owner}/{repo}/issues/{issue_number}` depends on:
 | Number | `<span class="index">#{number}</span>` |
 | Title | `<meta property="og:title" content="{title}">` |
 | Closed state | `issue-state-label` containing an SVG class with `octicon-issue-closed` |
-| Raw issue body | `<div id="issue-{number}-raw" ...>...</div>` |
+| Raw issue body | `<div id="issue-{issue_id}-raw" ...>...</div>` — keyed by the **global** issue id, not the number |
 | Milestone | Link ending in `/milestone/{milestone_id}` with direct text |
 | Real comment block | `<div class="timeline-item comment" id="issuecomment-{id}">` |
 | Comment author | Anchor whose class starts with `author` |
@@ -328,6 +409,14 @@ defaults to `open`; it does not independently prove that the issue is open.
 Raw body extraction stops at the first closing `</div>`, so nested markup would
 not be handled correctly. The page is expected to expose raw Markdown in these
 elements.
+
+The issue body's element id is the trap here. Issue *numbers* restart at 1 in
+every repository, while issue *ids* keep counting across the instance, so the
+two are equal only in the first repository an instance ever creates. The client
+therefore reads `data-issue-id` from the page and looks the body up by that,
+falling back to the number. A fixture — or a test instance with a single
+repository — cannot tell the two apart, which is why the integration suite seeds
+a second repository specifically to force them to diverge.
 
 ## 10. Composed read workflows
 
@@ -432,6 +521,28 @@ Project and milestone reopen, column reordering, organization/user-level
 projects, and the unimplemented issue-sidebar routes were not live-verified in
 that investigation.
 
+### Live verification across Forgejo 1.20 through 16
+
+The integration suite (`uv run pytest -m integration --forgejo-version N`) boots
+a throwaway instance per version, seeds an admin, a repository, issues and a
+milestone, then exercises the full surface: project create/list/read/rename/
+close/reopen/delete, column create/edit/default/delete, card attach/move/bulk
+move/detach, issue create-onto-board/read/delete, milestone create/edit/close/
+reopen/delete, the composed project/column/milestone readers with paging, and
+per-issue failure reporting in bulk reads.
+
+Every route, form and DOM anchor in this document behaves identically on majors
+7 through 16. The differences are all older, and all recorded above:
+
+| Difference | Versions | Handled by |
+|---|---|---|
+| Writes need a CSRF token | below 14.0 | `csrf-token-required` quirk |
+| Board title absent from the page `<title>` | below 10.0 | `board-title-missing-from-page-title` quirk |
+| Columns are called "boards" in the markup | below 1.21 | `legacy-board-vocabulary` quirk |
+| `issues/new` answers 303 rather than JSON | 1.20 | `Location` header fallback in `create_issue` |
+
+Each is asserted by the suite, which runs every test once per requested version.
+
 ### Current offline verification
 
 The tests assert the implemented request methods, paths, form/JSON payloads,
@@ -455,7 +566,13 @@ UV_CACHE_DIR=/tmp/forgejo-projects-mcp-uv-cache uv run pytest -q
 ```
 
 These are fake-context tests and do not replace an integration run against the
-deployed Forgejo version. After a Forgejo upgrade, re-run live smoke tests for
-authentication, every mutation route, list filtering, and every DOM selector
-in sections 6 and 9, then update this reference with the tested version and any
-changes.
+deployed Forgejo version. After a Forgejo release, run the integration suite
+against it:
+
+```bash
+uv run pytest -m integration --forgejo-version <new> --forgejo-version 16
+```
+
+A failure there names the contract that moved. Record the difference in this
+document, add a `compat.Quirk` scoped to the affected versions, and extend
+`NEWEST_VERIFIED` once the new release passes.

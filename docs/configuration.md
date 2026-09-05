@@ -6,22 +6,28 @@ Configuration is environment-based. The package also loads a `.env` file automat
 
 | Variable | Requirement | Description | Example |
 |---|---|---|---|
-| `FORGEJO_URL` | Always | Forgejo instance base URL. Trailing `/` characters are removed. | `https://forge.example.com` |
+| `FORGEJO_URL` | Until persisted | Forgejo instance base URL. Trailing `/` characters are removed. | `https://forge.example.com` |
 | `FORGEJO_USERNAME` | Fresh login only | Forgejo username used for web login. | `your-username` |
 | `FORGEJO_PASSWORD` | Fresh login only | Forgejo account password used for web login. | `your-password` |
 
-The URL is needed before the client can load and check a cached session.
-Username and password are validated only when Forgejo requires a fresh login,
-including `authenticate(force=true)`. A valid cached session can therefore be
-used with only `FORGEJO_URL`. A value missing when it is required produces an
-`AuthError` with code `MISSING_CONFIG`.
+The URL is needed before the client can load and check a cached session, but
+after the first successful login it is read back from the persisted config file
+(see [Persisted settings](#persisted-settings-and-session-cache)), so no
+environment variable is required. Username and password are validated only when
+Forgejo requires a fresh login, including `authenticate(force=true)`. A value
+missing when it is required produces an `AuthError` with code `MISSING_CONFIG`.
+
+The URL and username can also be supplied to the CLI as options
+(`--forgejo-url`, `--forgejo-username`) and the password via `--forgejo-password`
+or `--forgejo-password-stdin`. Precedence is **CLI option > environment variable
+> persisted config file**. See the [CLI reference](cli.md#credentials).
 
 In an interactive terminal, `forgejo-projects-cli` prompts for missing values or
 replacement credentials after a rejected login. It tries at most three prompted
 credential sets. Prompts are written to stderr, the password is not echoed, and
-only the resulting session cookie state is persisted. The MCP stdio server and
-noninteractive CLI invocations never prompt, so configure their environment or
-`.env` file before use.
+only the resulting session cookie state and the non-secret config file are
+persisted. The MCP stdio server and noninteractive CLI invocations never prompt,
+so configure their environment or `.env` file before use.
 
 The tool intentionally uses a session login rather than a personal access token. The internal web routes used for Projects are not covered by Forgejo's normal `/api/v1` token authentication.
 
@@ -62,12 +68,14 @@ FORGEJO_PASSWORD='p@ss$word!'
 
 Never commit `.env`. The repository's `.gitignore` excludes it, but check `git status` before sharing a checkout.
 
-## Session cache
+## Persisted settings and session cache
 
-After a successful login, the authenticated Playwright storage state is saved at:
+After a successful login, two files are written under
+`<config>/forgejo_projects_mcp/`:
 
 ```text
-<config>/forgejo_projects_mcp/storage_state.json
+storage_state.json   # authenticated Playwright storage state (session cookies)
+config.json          # non-secret connection settings: {"base_url", "username"}
 ```
 
 where `<config>` is:
@@ -85,9 +93,12 @@ Windows: <home>/.config/forgejo_projects_mcp/storage_state.json
 
 The client reuses this state and checks `/user/settings`. If the session expires, it logs in again and replaces the cache. `authenticate(force=true)` ignores the current cached session and creates a fresh login.
 
-The state does not store the configured URL, username, or password. A later
-process still needs `FORGEJO_URL`; if the cached session has expired, it also
-needs username and password or an interactive CLI prompt.
+`config.json` stores the instance URL and username so later processes can run
+with no environment variables at all: the client reads them back on startup, and
+an environment variable, when set, takes precedence over the file. The password
+is **never** written to either file — if the cached session has expired, the
+password is still required (via `FORGEJO_PASSWORD`, a CLI option, or an
+interactive prompt).
 
 The state file contains authentication cookies and must be treated as a credential. Protect it with the operating system's file permissions, do not put it in source control, and remove it when decommissioning a machine or account. Changing `XDG_CONFIG_HOME` makes the process use a different cache; it does not migrate the old file.
 
