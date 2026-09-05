@@ -55,7 +55,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        forgejo: ["1.20", "13", "16"]
+        # The releases still in support. Older ones are handled by documented
+        # quirks in compat.py and stay covered by the offline suite and by the
+        # full local sweep, but they are long EOL and not worth CI minutes.
+        forgejo: ["14", "15", "16"]
     steps:
       - uses: actions/checkout@v7
 

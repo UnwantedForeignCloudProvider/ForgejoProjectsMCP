@@ -239,8 +239,21 @@ be caught by that check instead of by the request it is meant to interrupt.
 
 When changing a route or parser, update the corresponding contract tests, add a
 `compat` quirk if the behavior is version-specific, and run the integration
-suite against both the oldest and newest supported release
+suite against both the oldest and newest release the client claims to handle
 (`--forgejo-version 1.20 --forgejo-version 16`).
+
+That local run matters because **CI only covers the releases still in support**
+(14, 15 and 16). All three resolve to the same profile with no quirks in force,
+so nothing below 14 — and no quirk — is exercised on a push. The quirked
+releases are protected by the offline suite and by whoever runs the full sweep:
+
+```bash
+uv run pytest -m integration --forgejo-version 1.20 --forgejo-version 1.21 \
+  --forgejo-version 7 --forgejo-version 8 --forgejo-version 9 \
+  --forgejo-version 10 --forgejo-version 11 --forgejo-version 12 \
+  --forgejo-version 13 --forgejo-version 14 --forgejo-version 15 \
+  --forgejo-version 16
+```
 
 ## Limitations and risk
 
