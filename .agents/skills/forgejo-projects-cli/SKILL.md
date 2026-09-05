@@ -20,20 +20,23 @@ when the environment can't speak MCP.
 
 - The `forgejo-projects-cli` command must be installed (`uv tool install .` from
   the repo, or `uv tool install forgejo-projects-mcp`).
-- These environment variables must be set (the CLI authenticates and caches the
-  session automatically):
-  - `FORGEJO_URL` — e.g. `https://forge.example.com`
-  - `FORGEJO_USERNAME`
-  - `FORGEJO_PASSWORD`
+- For noninteractive use, configure `FORGEJO_URL` (for example,
+  `https://forge.example.com`). Configure `FORGEJO_USERNAME` and
+  `FORGEJO_PASSWORD` when a fresh login is needed. A valid cached session can be
+  reused with only the URL.
+- In an interactive terminal, the CLI prompts for missing values and retries
+  rejected credentials up to three times. Password input is hidden and remains
+  in memory; only the authenticated session state is cached.
 
-If they are missing, calls fail with `[MISSING_CONFIG]`. Do not put credentials
-on the command line.
+Missing values in noninteractive use, or a cancelled interactive prompt, fail
+with `[MISSING_CONFIG]`. Do not put credentials on the command line.
 
 ## Discovering commands (do this instead of guessing)
 
 ```bash
 forgejo-projects-cli --help          # list every subcommand (tool)
 forgejo-projects-cli <tool> --help   # exact options for one tool
+forgejo-projects-cli authenticate --force true  # replace a cached session
 ```
 
 Options mirror each tool's parameters as `--flag` (e.g. `--owner`, `--repo`,

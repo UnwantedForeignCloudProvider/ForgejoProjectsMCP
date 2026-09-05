@@ -126,7 +126,7 @@ docs (and commit) before releasing** if anything is stale:
 
 - [ ] **Tool surface matches the docs.** The set of tools and their
       arguments/filters must be reflected in `README.md` (the *Tools* section),
-      `.claude/skills/forgejo-projects-cli/SKILL.md`, and the CLI help. Compare
+      `.agents/skills/forgejo-projects-cli/SKILL.md`, and the CLI help. Compare
       the live list against the docs:
 
       ```bash
@@ -175,7 +175,7 @@ If you changed docs, include them in the release commit (below).
   `## [X.Y.Z]` heading, so the heading format must be exact.
 - [ ] Leave a fresh, empty `## [Unreleased]` section above it.
 - [ ] Commit the changelog **and any doc updates from 2.4**:
-      `git add CHANGELOG.md README.md .env.example .claude docs && git commit -m "chore: release X.Y.Z"`
+      `git add CHANGELOG.md README.md .env.example .agents docs && git commit -m "chore: release X.Y.Z"`
       (drop paths you didn't change).
 
 ### 2.6 Preview the version that will be built

@@ -5,6 +5,13 @@ a subcommand**, generated from the same tool definitions and dispatched
 in-process (no MCP transport). It reads the same env vars, prints the JSON result
 to **stdout**, logs to **stderr**, and exits **non-zero on error**.
 
+When stdin and stderr are attached to a terminal, the CLI prompts for missing
+credentials and retries rejected credentials up to three times. Password input
+is hidden and remains in memory; only the authenticated session state is cached.
+Noninteractive invocations never prompt and require the relevant environment or
+`.env` values. Use `forgejo-projects-cli authenticate --force true` to replace a
+cached session explicitly.
+
 ## Discover
 
 ```bash

@@ -9,6 +9,12 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ## [Unreleased]
 
+## [0.1.0rc2] - 2026-09-05
+
+### Added
+- Prompt interactively for missing or rejected Forgejo credentials in terminal
+  CLI sessions, without persisting passwords.
+
 ### Fixed
 - Publish GitHub Releases through a draft-first flow so immutable releases
   receive the wheel and source distribution before publication.
