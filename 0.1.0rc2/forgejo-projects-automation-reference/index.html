@@ -1,0 +1,2205 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="MCP server + CLI for managing Forgejo Projects / Kanban boards">
+      
+      
+      
+      
+        <link rel="prev" href="../reference/server/">
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+    
+    
+      
+        <title>Endpoint reference - forgejo-projects-mcp</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#forgejo-pages-and-internal-web-routes-automation-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="forgejo-projects-mcp" class="md-header__button md-logo" aria-label="forgejo-projects-mcp" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            forgejo-projects-mcp
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Endpoint reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m17.75 4.09-2.53 1.94.91 3.06-2.63-1.81-2.63 1.81.91-3.06-2.53-1.94L12.44 4l1.06-3 1.06 3zm3.5 6.91-1.64 1.25.59 1.98-1.7-1.17-1.7 1.17.59-1.98L15.75 11l2.06-.05L18.5 9l.69 1.95zm-2.28 4.95c.83-.08 1.72 1.1 1.19 1.85-.32.45-.66.87-1.08 1.27C15.17 23 8.84 23 4.94 19.07c-3.91-3.9-3.91-10.24 0-14.14.4-.4.82-.76 1.27-1.08.75-.53 1.93.36 1.85 1.19-.27 2.86.69 5.83 2.89 8.02a9.96 9.96 0 0 0 8.02 2.89m-1.64 2.02a12.08 12.08 0 0 1-7.8-3.47c-2.17-2.19-3.33-5-3.49-7.82-2.81 3.14-2.7 7.96.31 10.98 3.02 3.01 7.84 3.12 10.98.31"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 7a5 5 0 0 1 5 5 5 5 0 0 1-5 5 5 5 0 0 1-5-5 5 5 0 0 1 5-5m0 2a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3m0-7 2.39 3.42C13.65 5.15 12.84 5 12 5s-1.65.15-2.39.42zM3.34 7l4.16-.35A7.2 7.2 0 0 0 5.94 8.5c-.44.74-.69 1.5-.83 2.29zm.02 10 1.76-3.77a7.131 7.131 0 0 0 2.38 4.14zM20.65 7l-1.77 3.79a7.02 7.02 0 0 0-2.38-4.15zm-.01 10-4.14.36c.59-.51 1.12-1.14 1.54-1.86.42-.73.69-1.5.83-2.29zM12 22l-2.41-3.44c.74.27 1.55.44 2.41.44.82 0 1.63-.17 2.37-.44z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ForgejoProjectsMCP
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="forgejo-projects-mcp" class="md-nav__button md-logo" aria-label="forgejo-projects-mcp" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    forgejo-projects-mcp
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    ForgejoProjectsMCP
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../getting-started/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Getting started
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Installation
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Configuration
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../usage/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Usage
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../tools/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Tools reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    CLI
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Python API reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Python API reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/__init__/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    __init__.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/_env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    _env.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    cli.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/client/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    client.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../reference/server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    server.py
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Endpoint reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-scope-and-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Scope and evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-identifier-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Identifier semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-authentication-session-and-generic-request-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Authentication, session, and generic request behavior
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Authentication, session, and generic request behavior">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authentication-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication pages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-repository-search-endpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Repository search endpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-project-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Project pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Project pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routes-and-forms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routes and forms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-project-board-html-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Project board HTML contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-column-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Column routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-cards-and-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Cards and issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Cards and issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resolving-issue-numbers-to-global-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolving issue numbers to global IDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attach-detach-and-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attach, detach, and move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#create-and-delete-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create and delete issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-issue-list-and-detail-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Issue list and detail pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Issue list and detail pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#filtered-issues-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filtered issues list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issue-detail-dom-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issue detail DOM contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-composed-read-workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Composed read workflows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-milestone-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Milestone pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Milestone pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routes-and-forms_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routes and forms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-observed-routes-outside-current-client-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Observed routes outside current client coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-verification-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Verification record
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Verification record">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#historical-live-verification-on-forgejo-v1507" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historical live verification on Forgejo v15.0.7
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-offline-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current offline verification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#1-scope-and-evidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        1. Scope and evidence
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#2-identifier-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        2. Identifier semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#3-authentication-session-and-generic-request-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        3. Authentication, session, and generic request behavior
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="3. Authentication, session, and generic request behavior">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#authentication-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Authentication pages
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#rate-limiting" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rate limiting
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#4-repository-search-endpoint" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        4. Repository search endpoint
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#5-project-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        5. Project pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="5. Project pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routes-and-forms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routes and forms
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-creation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project creation
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#project-update" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Project update
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#6-project-board-html-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        6. Project board HTML contract
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#7-column-routes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        7. Column routes
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#8-cards-and-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        8. Cards and issues
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="8. Cards and issues">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#resolving-issue-numbers-to-global-ids" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Resolving issue numbers to global IDs
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attach-detach-and-move" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Attach, detach, and move
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#create-and-delete-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Create and delete issues
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#9-issue-list-and-detail-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        9. Issue list and detail pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="9. Issue list and detail pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#filtered-issues-list" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Filtered issues list
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issue-detail-dom-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Issue detail DOM contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#10-composed-read-workflows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        10. Composed read workflows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#11-milestone-pages" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        11. Milestone pages
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="11. Milestone pages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#routes-and-forms_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Routes and forms
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#12-observed-routes-outside-current-client-coverage" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        12. Observed routes outside current client coverage
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#13-verification-record" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        13. Verification record
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="13. Verification record">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#historical-live-verification-on-forgejo-v1507" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Historical live verification on Forgejo v15.0.7
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#current-offline-verification" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current offline verification
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="forgejo-pages-and-internal-web-routes-automation-reference">Forgejo pages and internal web routes — automation reference<a class="headerlink" href="#forgejo-pages-and-internal-web-routes-automation-reference" title="Permanent link">&para;</a></h1>
+<p>This is the source of truth for every Forgejo page, internal web route, form,
+query parameter, response shape, DOM anchor, and page-specific behavior on
+which <code>forgejo_projects_mcp</code> depends.</p>
+<p>The contracts below were audited against
+<code>src/forgejo_projects_mcp/client.py</code> on <strong>2026-09-04</strong>. The original route
+discovery was performed against <strong>Forgejo v15.0.7</strong>. These routes are internal,
+unversioned Forgejo web interfaces and may change between Forgejo releases.</p>
+<p>When code starts depending on another Forgejo page detail, update this file in
+the same change. Do not leave the only record of a route, field name, selector,
+response quirk, or Forgejo-specific workaround in source comments or tests.</p>
+<h2 id="1-scope-and-evidence">1. Scope and evidence<a class="headerlink" href="#1-scope-and-evidence" title="Permanent link">&para;</a></h2>
+<p>The implemented client supports repository-level resources under
+<code>/{owner}/{repo}</code>. Organization- and user-level project prefixes such as
+<code>/{org}/-/projects</code> and <code>/{user}/-/projects</code> are not implemented or verified.</p>
+<p>Evidence in this document has three levels:</p>
+<ul>
+<li><strong>Implemented and offline-tested</strong> means the current client uses the contract
+  and the test suite checks it with a fake Forgejo request context.</li>
+<li><strong>Historically live-verified</strong> means the original investigation exercised it
+  against Forgejo v15.0.7.</li>
+<li><strong>Observed or inferred only</strong> means the current client does not use it; do not
+  rely on it without live verification.</li>
+</ul>
+<p>The current implementation uses Playwright's HTTP-only <code>APIRequestContext</code>.
+It does not launch a browser or use a persistent browser profile.</p>
+<p>At the time of the v15.0.7 investigation, Projects/Kanban did not have the
+needed <code>/api/v1</code> coverage. Issues, milestones, labels, comments, and assignees
+did have official API coverage. The client nevertheless uses the internal web
+routes documented here for all of its operations.</p>
+<h2 id="2-identifier-semantics">2. Identifier semantics<a class="headerlink" href="#2-identifier-semantics" title="Permanent link">&para;</a></h2>
+<p>Forgejo exposes two different identifiers for an issue. They must not be
+interchanged.</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Meaning</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>project_id</code></td>
+<td>Repository-local project identifier</td>
+<td><code>/projects/{project_id}</code> links</td>
+</tr>
+<tr>
+<td><code>column_id</code></td>
+<td>Project-column identifier</td>
+<td><code>.project-column[data-id]</code></td>
+</tr>
+<tr>
+<td><code>issue_number</code></td>
+<td>Repository-local issue number used in <code>/issues/{issue_number}</code></td>
+<td>Card link and <code>&lt;span class="index"&gt;</code></td>
+</tr>
+<tr>
+<td><code>issue_id</code></td>
+<td>Global Forgejo database ID used by board mutations</td>
+<td>Card <code>data-issue</code> or issue-page <code>data-issue-id</code></td>
+</tr>
+<tr>
+<td><code>milestone_id</code></td>
+<td>Repository milestone identifier</td>
+<td><code>/milestone/{milestone_id}</code> links</td>
+</tr>
+</tbody>
+</table>
+<p>In particular, <code>.issue-card[data-issue]</code> contains the global <code>issue_id</code>, not the
+repository-local issue number. The latter is parsed from the card's
+<code>/issues/{number}</code> link.</p>
+<p>The accepted logical states are <code>open</code>, <code>closed</code>, and <code>all</code>. Project and
+milestone list pages do not provide a working <code>all</code> view: Forgejo v15.0.7
+silently showed open entries for <code>state=all</code>. The client therefore requests
+<code>open</code> and <code>closed</code> separately and merges them by ID. The issues list does
+receive <code>state=all</code> directly.</p>
+<h2 id="3-authentication-session-and-generic-request-behavior">3. Authentication, session, and generic request behavior<a class="headerlink" href="#3-authentication-session-and-generic-request-behavior" title="Permanent link">&para;</a></h2>
+<h3 id="authentication-pages">Authentication pages<a class="headerlink" href="#authentication-pages" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Purpose</th>
+<th>Method</th>
+<th>Path</th>
+<th>Form or success condition</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Check session</td>
+<td>GET</td>
+<td><code>/user/settings</code></td>
+<td>HTTP 200 means authenticated; redirects are disabled</td>
+</tr>
+<tr>
+<td>Log in</td>
+<td>POST</td>
+<td><code>/user/login</code></td>
+<td><code>user_name</code>, <code>password</code>, <code>remember=on</code></td>
+</tr>
+</tbody>
+</table>
+<p>Login redirects are disabled. Status 301, 302, 303, 307, or 308 is treated as
+the initial success signal; a re-rendered HTTP 200 is treated as invalid
+credentials. The client then checks <code>/user/settings</code> again before accepting the
+session.</p>
+<p>The session is stored as Playwright storage state at
+<code>$XDG_CONFIG_HOME/forgejo_projects_mcp/storage_state.json</code>, or under
+<code>Path.home()/.config/forgejo_projects_mcp/</code> when <code>XDG_CONFIG_HOME</code> is unset.
+The session cookie observed on v15.0.7 was <code>i_like_gitea</code> with <code>HttpOnly</code>.</p>
+<p>Every request context sends <code>Origin: {FORGEJO_URL}</code>. The implemented write
+requests do not send an explicit <code>_csrf</code> field. Writes without <code>_csrf</code> were
+historically live-verified on v15.0.7; this is version-specific behavior and
+does not establish how newer Forgejo versions implement CSRF protection.
+Personal access tokens were not accepted by these internal web routes in that
+investigation.</p>
+<p>If a non-login request redirects to, or ends at, <code>/user/login</code>, the client logs
+in again and retries the request once. Other redirects are normally followed;
+write operations explicitly documented with redirect handling below disable
+redirect following.</p>
+<p>HTTP 400 and above is an error. For JSON errors, the client reads the
+<code>message</code> member. For HTML errors, it exposes only the first concise <code>&lt;p&gt;</code>
+value, not the raw page.</p>
+<h3 id="rate-limiting">Rate limiting<a class="headerlink" href="#rate-limiting" title="Permanent link">&para;</a></h3>
+<p>All requests share these client-side limits:</p>
+<ul>
+<li>Concurrent requests: <code>FORGEJO_MCP_MAX_CONCURRENCY</code>, default <code>8</code>, minimum <code>1</code>.</li>
+<li>Steady request rate: <code>FORGEJO_MCP_RPS</code>, default <code>5</code>, minimum <code>0.1</code>.</li>
+<li>HTTP 429 and 503 are retried up to two times. A numeric <code>Retry-After</code> value is
+  honored; otherwise the delay is two seconds.</li>
+</ul>
+<h2 id="4-repository-search-endpoint">4. Repository search endpoint<a class="headerlink" href="#4-repository-search-endpoint" title="Permanent link">&para;</a></h2>
+<p>Repository selection uses a JSON web endpoint rather than an HTML page.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Query</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>GET</td>
+<td><code>/repo/search</code></td>
+<td><code>q={query}</code>, <code>limit={limit}</code>, <code>page={page}</code></td>
+</tr>
+</tbody>
+</table>
+<p>The response is expected to contain a <code>data</code> array. Each item may either be the
+repository object itself or wrap it in <code>repository</code>. The client reads
+<code>full_name</code>, <code>description</code>, <code>private</code>, <code>archived</code>, <code>empty</code>, and <code>fork</code>; owner
+and repository name are derived by splitting <code>full_name</code>.</p>
+<h2 id="5-project-pages">5. Project pages<a class="headerlink" href="#5-project-pages" title="Permanent link">&para;</a></h2>
+<h3 id="routes-and-forms">Routes and forms<a class="headerlink" href="#routes-and-forms" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Method</th>
+<th>Path</th>
+<th>Query or form</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>List one state</td>
+<td>GET</td>
+<td><code>/{owner}/{repo}/projects</code></td>
+<td>Query <code>state=open</code> or <code>state=closed</code></td>
+</tr>
+<tr>
+<td>Create</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/new</code></td>
+<td><code>redirect</code>, <code>title</code>, <code>content</code>, <code>template_type</code>, <code>card_type</code></td>
+</tr>
+<tr>
+<td>View board</td>
+<td>GET</td>
+<td><code>/{owner}/{repo}/projects/{project_id}</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Read edit form</td>
+<td>GET</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/edit</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Update</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/edit</code></td>
+<td><code>redirect</code>, <code>title</code>, <code>content</code>, <code>card_type</code></td>
+</tr>
+<tr>
+<td>Close</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/close</code></td>
+<td>Empty form</td>
+</tr>
+<tr>
+<td>Reopen</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/open</code></td>
+<td>Empty form</td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/delete</code></td>
+<td>Empty form</td>
+</tr>
+</tbody>
+</table>
+<p>The list parser finds double-quoted anchors ending in <code>/projects/{id}</code> and uses
+their direct text as the title. Forgejo may render several links for one
+project; the client keeps the longest non-empty title found for each ID and
+returns projects sorted by ID.</p>
+<p>For a logical <code>state=all</code>, the client performs two list requests (<code>open</code>, then
+<code>closed</code>) and merges the results by project ID. Invalid states are rejected
+before a request is sent.</p>
+<h3 id="project-creation">Project creation<a class="headerlink" href="#project-creation" title="Permanent link">&para;</a></h3>
+<p>The create form sends:</p>
+<div class="highlight"><pre><span></span><code>redirect=
+title={title}
+content={description}
+template_type=
+card_type=1|2
+</code></pre></div>
+<p><code>card_type=1</code> means text; <code>card_type=2</code> means images and text. Public tool values
+<code>text</code> and <code>images_and_text</code> are mapped to those numeric strings. The client
+always requests an empty template type.</p>
+<p>Redirect following is disabled. The response does not supply an ID that the
+client consumes, so it lists open projects and selects the last project, in ID
+order, whose title exactly matches. If none matches, it falls back to the last
+open project; if the list is empty, the returned project is <code>null</code>. Duplicate
+titles or concurrent creation can therefore make ID recovery ambiguous.</p>
+<h3 id="project-update">Project update<a class="headerlink" href="#project-update" title="Permanent link">&para;</a></h3>
+<p>Before updating, the client reads the edit page and extracts:</p>
+<ul>
+<li>Current title from <code>name="title" ... value="..."</code>.</li>
+<li>Current card type from <code>name="card_type" ... value="..."</code>.</li>
+</ul>
+<p>An omitted title and card type are preserved. The implementation does not read
+the existing description: when <code>description</code> is omitted it still sends
+<code>content=</code> and clears the description. This is current client behavior and an
+important destructive edge case.</p>
+<p>Project close, reopen, and delete disable redirect following. Project deletion
+must use POST; DELETE returned HTTP 500 during the v15.0.7 live investigation.
+The reopen route is implemented and offline-tested but was not live-verified in
+the original investigation.</p>
+<h2 id="6-project-board-html-contract">6. Project board HTML contract<a class="headerlink" href="#6-project-board-html-contract" title="Permanent link">&para;</a></h2>
+<p><code>GET /{owner}/{repo}/projects/{project_id}</code> supplies the board data.</p>
+<p>The current parser depends on these anchors:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>HTML contract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Board title</td>
+<td>First <code>&lt;title&gt;</code> text, truncated before the first <code>-</code></td>
+</tr>
+<tr>
+<td>Real column</td>
+<td>Opening tag begins <code>&lt;div class="project-column...</code> where the exact <code>project-column</code> token is followed by a quote or space</td>
+</tr>
+<tr>
+<td>Column ID</td>
+<td><code>data-id="{column_id}"</code> on that opening tag</td>
+</tr>
+<tr>
+<td>Column title</td>
+<td>Direct text under an element whose class contains <code>project-column-title-label</code></td>
+</tr>
+<tr>
+<td>Card/global issue ID</td>
+<td><code>data-issue="{issue_id}"</code></td>
+</tr>
+<tr>
+<td>Card issue number</td>
+<td><code>/issues/{issue_number}</code> link within the card block</td>
+</tr>
+<tr>
+<td>Card title</td>
+<td>Direct text of that issue link</td>
+</tr>
+</tbody>
+</table>
+<p>Matching the exact <code>project-column</code> token prevents elements such as
+<code>project-column-header</code>, <code>project-column-title</code>, and
+<code>new-project-column-modal</code> from becoming fake columns.</p>
+<p>The parser is regex-based and assumes the relevant double-quoted attributes
+and their current ordering. Nested or substantially changed markup can break
+it. Empty/missing values generally become an empty title, a missing issue
+number, or an omitted column rather than a dedicated parse error.</p>
+<p>The historically observed <code>.ui.cards</code> column container is not used by the
+current parser. Do not depend on the previously documented
+<code>.ui.cards[data-url=...]</code> selector without re-verifying it.</p>
+<h2 id="7-column-routes">7. Column routes<a class="headerlink" href="#7-column-routes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Method</th>
+<th>Path</th>
+<th>Form or JSON</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}</code></td>
+<td>Form <code>title</code>, <code>color</code></td>
+</tr>
+<tr>
+<td>Edit</td>
+<td>PUT</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/{column_id}</code></td>
+<td>Form containing supplied <code>title</code> and/or <code>color</code></td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>DELETE</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/{column_id}</code></td>
+<td>—</td>
+</tr>
+<tr>
+<td>Set default</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/{column_id}/default</code></td>
+<td>Empty form</td>
+</tr>
+<tr>
+<td>Reorder columns</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/move</code></td>
+<td>Inferred JSON <code>{columns:[{columnID, sorting}]}</code>; not implemented</td>
+</tr>
+</tbody>
+</table>
+<p>Colors are optional hex strings such as <code>#e01e5a</code>. Column edit must use PUT;
+POST returned HTTP 405 during live verification.</p>
+<p>After creation, the client reads the board and returns the last column whose
+title exactly matches. If no title matches, the returned column is <code>null</code>.</p>
+<p>The default column cannot be deleted. The client adds guidance to select
+another default column when Forgejo rejects such a deletion. Historically, a
+new project exposed an implicit “Uncategorized” destination as its default;
+that observation is not a selector contract used by the current parser.</p>
+<p>Column reordering and its payload were inferred from the UI but are not used or
+covered by the client tests. Card movement is implemented separately.</p>
+<h2 id="8-cards-and-issues">8. Cards and issues<a class="headerlink" href="#8-cards-and-issues" title="Permanent link">&para;</a></h2>
+<h3 id="resolving-issue-numbers-to-global-ids">Resolving issue numbers to global IDs<a class="headerlink" href="#resolving-issue-numbers-to-global-ids" title="Permanent link">&para;</a></h3>
+<p>Board mutation endpoints require global <code>issue_id</code> values. Public tools accept
+repository-local issue numbers, so the client first requests:</p>
+<div class="highlight"><pre><span></span><code><span class="err">GET /{owner}/{repo}/issues/{issue_number}</span>
+</code></pre></div>
+<p>It extracts <code>data-issue-id="{issue_id}"</code>. If absent, resolution fails with
+<code>ISSUE_NOT_FOUND</code>/HTTP 404. Normal add, remove, and move operations resolve
+numbers sequentially; bulk move resolves them concurrently.</p>
+<h3 id="attach-detach-and-move">Attach, detach, and move<a class="headerlink" href="#attach-detach-and-move" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Method</th>
+<th>Path</th>
+<th>Form or JSON</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Attach issues</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/projects</code></td>
+<td>Form <code>id={project_id}</code>, <code>issue_ids={comma-separated global IDs}</code></td>
+</tr>
+<tr>
+<td>Detach issues</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/projects</code></td>
+<td>Form <code>id=0</code>, <code>issue_ids={comma-separated global IDs}</code></td>
+</tr>
+<tr>
+<td>Move/reorder cards</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/{column_id}/move</code></td>
+<td>JSON <code>{"issues":[{"issueID":ID,"sorting":0}]}</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>sorting</code> is zero-based and follows the order supplied to the operation. The
+JSON request explicitly uses <code>Content-Type: application/json</code>. The move route
+historically returned <code>{"ok":true}</code>; the client returns parsed JSON when
+possible and otherwise returns the HTTP status.</p>
+<p>Attaching an issue places it in the project's default column. Detaching is the
+equivalent of deleting a card and does not delete the issue itself.</p>
+<p>Bulk movement groups requested cards by destination column and sends one move
+request per column. Ordering is relative to each destination group.</p>
+<h3 id="create-and-delete-issues">Create and delete issues<a class="headerlink" href="#create-and-delete-issues" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Method</th>
+<th>Path</th>
+<th>Form</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Create</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/new</code></td>
+<td><code>title</code>, <code>content</code>, plus optional <code>project_id</code>, <code>milestone_id</code>, <code>label_ids</code>, <code>assignee_ids</code></td>
+</tr>
+<tr>
+<td>Permanently delete</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/{issue_number}/delete</code></td>
+<td>Empty form</td>
+</tr>
+</tbody>
+</table>
+<p><code>label_ids</code> and <code>assignee_ids</code> are comma-separated numeric IDs and are omitted
+when their lists are empty. Project and milestone fields are omitted when they
+are <code>null</code>.</p>
+<p>Forgejo v15.0.7 returned HTTP 200 with JSON resembling
+<code>{"redirect":"/.../issues/{issue_number}"}</code> after issue creation. The client
+parses the issue number from that redirect. If the body is not usable JSON or
+does not contain that path, creation is still reported as successful but the
+returned issue number is <code>null</code>.</p>
+<p>Permanent issue deletion is distinct from detaching a project card.</p>
+<h2 id="9-issue-list-and-detail-pages">9. Issue list and detail pages<a class="headerlink" href="#9-issue-list-and-detail-pages" title="Permanent link">&para;</a></h2>
+<h3 id="filtered-issues-list">Filtered issues list<a class="headerlink" href="#filtered-issues-list" title="Permanent link">&para;</a></h3>
+<p>The client obtains issue numbers from:</p>
+<div class="highlight"><pre><span></span><code><span class="err">GET /{owner}/{repo}/issues?state={open|closed|all}&amp;type=all</span>
+</code></pre></div>
+<p>It optionally adds direct-value query parameters:</p>
+<div class="highlight"><pre><span></span><code>project={project_id}
+milestone={milestone_id}
+</code></pre></div>
+<p>All <code>/issues/{number}</code> occurrences in the returned HTML are collected,
+deduplicated, numerically sorted, and then read individually. This parser does
+not distinguish issue links in the main result list from unrelated matching
+links elsewhere on the page.</p>
+<h3 id="issue-detail-dom-contract">Issue detail DOM contract<a class="headerlink" href="#issue-detail-dom-contract" title="Permanent link">&para;</a></h3>
+<p>The parser for <code>GET /{owner}/{repo}/issues/{issue_number}</code> depends on:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>HTML contract</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Number</td>
+<td><code>&lt;span class="index"&gt;#{number}&lt;/span&gt;</code></td>
+</tr>
+<tr>
+<td>Title</td>
+<td><code>&lt;meta property="og:title" content="{title}"&gt;</code></td>
+</tr>
+<tr>
+<td>Closed state</td>
+<td><code>issue-state-label</code> containing an SVG class with <code>octicon-issue-closed</code></td>
+</tr>
+<tr>
+<td>Raw issue body</td>
+<td><code>&lt;div id="issue-{number}-raw" ...&gt;...&lt;/div&gt;</code></td>
+</tr>
+<tr>
+<td>Milestone</td>
+<td>Link ending in <code>/milestone/{milestone_id}</code> with direct text</td>
+</tr>
+<tr>
+<td>Real comment block</td>
+<td><code>&lt;div class="timeline-item comment" id="issuecomment-{id}"&gt;</code></td>
+</tr>
+<tr>
+<td>Comment author</td>
+<td>Anchor whose class starts with <code>author</code></td>
+</tr>
+<tr>
+<td>Raw comment body</td>
+<td><code>&lt;div id="issuecomment-{id}-raw" ...&gt;...&lt;/div&gt;</code></td>
+</tr>
+</tbody>
+</table>
+<p>Timeline event blocks are intentionally excluded from comments. Parsed HTML
+entities are unescaped. If the closed-state selector is absent, the parser
+defaults to <code>open</code>; it does not independently prove that the issue is open.
+Raw body extraction stops at the first closing <code>&lt;/div&gt;</code>, so nested markup would
+not be handled correctly. The page is expected to expose raw Markdown in these
+elements.</p>
+<h2 id="10-composed-read-workflows">10. Composed read workflows<a class="headerlink" href="#10-composed-read-workflows" title="Permanent link">&para;</a></h2>
+<p>These are not additional Forgejo endpoints; they explain how the pages above
+are combined.</p>
+<ul>
+<li><strong>Read card:</strong> fetch and parse one issue detail page.</li>
+<li><strong>Bulk read issues:</strong> fetch issue pages concurrently. Individual failures are
+  returned inline instead of aborting the batch. <code>open</code>/<code>closed</code> filtering is
+  applied after parsing; failures remain visible regardless of that filter.</li>
+<li><strong>Read column:</strong> fetch the board, select the requested column, optionally use
+  the filtered issues list for state/milestone filtering, then fetch each
+  selected issue page.</li>
+<li><strong>Read project:</strong> fetch the board, flatten cards in board/column order,
+  optionally filter through the issues list, paginate, fetch issue pages, and
+  reconstruct the column structure.</li>
+<li><strong>Read milestone:</strong> merge open and closed milestone lists to verify the ID,
+  query the issues list with the milestone and optional project filter, then
+  fetch the selected issue pages.</li>
+</ul>
+<p><code>limit</code> and <code>offset</code> are local pagination applied after IDs have been scraped;
+they are not sent to Forgejo. For an unfiltered project or column read
+(<code>state=all</code> and no milestone), the issues list request is skipped. A missing
+column or milestone produces a local HTTP-404-classified error.</p>
+<h2 id="11-milestone-pages">11. Milestone pages<a class="headerlink" href="#11-milestone-pages" title="Permanent link">&para;</a></h2>
+<h3 id="routes-and-forms_1">Routes and forms<a class="headerlink" href="#routes-and-forms_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Action</th>
+<th>Method</th>
+<th>Path</th>
+<th>Query or form</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>List one state</td>
+<td>GET</td>
+<td><code>/{owner}/{repo}/milestones</code></td>
+<td>Query <code>state=open</code> or <code>state=closed</code></td>
+</tr>
+<tr>
+<td>Create</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/milestones/new</code></td>
+<td><code>title</code>, <code>content</code>, <code>deadline</code></td>
+</tr>
+<tr>
+<td>Edit</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/milestones/{milestone_id}/edit</code></td>
+<td><code>title</code>, <code>content</code>, <code>deadline</code></td>
+</tr>
+<tr>
+<td>Close</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/milestones/{milestone_id}/close</code></td>
+<td><code>id={milestone_id}</code></td>
+</tr>
+<tr>
+<td>Reopen</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/milestones/{milestone_id}/open</code></td>
+<td><code>id={milestone_id}</code></td>
+</tr>
+<tr>
+<td>Delete</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/milestones/delete</code></td>
+<td><code>id={milestone_id}</code></td>
+</tr>
+</tbody>
+</table>
+<p>The list page is plural (<code>/milestones</code>) but milestone links are singular
+(<code>/milestone/{milestone_id}</code>). The parser reads double-quoted singular links,
+keeps the longest non-empty direct text found for each ID, and sorts by ID.</p>
+<p>For logical <code>state=all</code>, open and closed pages are fetched separately and
+merged. The page silently showed open milestones for <code>state=all</code> during the
+v15.0.7 investigation.</p>
+<p>After creation, the client lists open milestones and returns the last exact
+title match, or <code>null</code> if there is no match. Duplicate titles or concurrent
+creation can make recovery ambiguous. <code>deadline</code> is sent as an optional
+<code>YYYY-MM-DD</code> string; an empty string means no deadline.</p>
+<p>Milestone edit always sends all three fields. Every omitted argument becomes
+an empty string, so a nominally partial edit clears every unspecified title,
+description, or deadline. This is current client behavior and a destructive
+edge case.</p>
+<p>The collection delete route is essential:</p>
+<div class="highlight"><pre><span></span><code><span class="err">POST /{owner}/{repo}/milestones/delete</span>
+<span class="err">id={milestone_id}</span>
+</code></pre></div>
+<p>Do not use <code>POST /milestones/{milestone_id}/delete</code>; it was observed returning
+HTTP 200 without deleting the milestone. Close and reopen use the item routes
+but still include <code>id</code> in the form. Reopen is implemented and offline-tested,
+but was not live-verified in the original investigation.</p>
+<h2 id="12-observed-routes-outside-current-client-coverage">12. Observed routes outside current client coverage<a class="headerlink" href="#12-observed-routes-outside-current-client-coverage" title="Permanent link">&para;</a></h2>
+<p>These routes appeared in the original page investigation but are not called by
+the current source. They are retained so that Forgejo page knowledge stays in
+one place. Their exact forms and current-version behavior require verification
+before implementation.</p>
+<table>
+<thead>
+<tr>
+<th>Capability</th>
+<th>Method</th>
+<th>Path</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Update issue title</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/{issue_number}/title</code></td>
+<td>Observed, not implemented</td>
+</tr>
+<tr>
+<td>Update issue content</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/{issue_number}/content</code></td>
+<td>Observed, not implemented</td>
+</tr>
+<tr>
+<td>Update issue labels</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/labels</code></td>
+<td>Observed, not implemented</td>
+</tr>
+<tr>
+<td>Update issue assignee</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/issues/assignee</code></td>
+<td>Observed, not implemented</td>
+</tr>
+<tr>
+<td>Reorder columns</td>
+<td>POST</td>
+<td><code>/{owner}/{repo}/projects/{project_id}/move</code></td>
+<td>Payload inferred, not implemented</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>/issues/projects</code> route and issue deletion route from the original helper
+list are implemented and documented in section 8.</p>
+<h2 id="13-verification-record">13. Verification record<a class="headerlink" href="#13-verification-record" title="Permanent link">&para;</a></h2>
+<h3 id="historical-live-verification-on-forgejo-v1507">Historical live verification on Forgejo v15.0.7<a class="headerlink" href="#historical-live-verification-on-forgejo-v1507" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Created projects and exercised raw same-origin writes without <code>_csrf</code>.</li>
+<li>Created and edited columns with PUT, selected a default, and deleted a
+  temporary non-default column.</li>
+<li>Created project issues, moved cards, and detached/re-attached issues through
+  <code>/issues/projects</code>.</li>
+<li>Created, edited, closed, and deleted a milestone.</li>
+<li>Closed and deleted projects and deleted the test issues.</li>
+<li>Confirmed column edit is PUT, column delete is DELETE, and project delete is
+  POST.</li>
+</ul>
+<p>Project and milestone reopen, column reordering, organization/user-level
+projects, and the unimplemented issue-sidebar routes were not live-verified in
+that investigation.</p>
+<h3 id="current-offline-verification">Current offline verification<a class="headerlink" href="#current-offline-verification" title="Permanent link">&para;</a></h3>
+<p>The tests assert the implemented request methods, paths, form/JSON payloads,
+HTML parsing behavior, list-state merging, composed reads, and the corrected
+milestone delete route. On the 2026-09-04 audit:</p>
+<div class="highlight"><pre><span></span><code>uv run pytest -q
+...................................................................      [100%]
+
+uv run mkdocs build --strict
+Documentation built successfully
+</code></pre></div>
+<p>In a sandbox where the normal user cache is read-only, <code>uv</code> can fail before
+running tests with <code>Could not acquire lock</code>. Pointing its cache at a writable
+temporary directory is an idempotent workaround:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">UV_CACHE_DIR</span><span class="o">=</span>/tmp/forgejo-projects-mcp-uv-cache<span class="w"> </span>uv<span class="w"> </span>run<span class="w"> </span>pytest<span class="w"> </span>-q
+</code></pre></div>
+<p>These are fake-context tests and do not replace an integration run against the
+deployed Forgejo version. After a Forgejo upgrade, re-run live smoke tests for
+authentication, every mutation route, list filtering, and every DOM selector
+in sections 6 and 9, then update this reference with the tested version and any
+changes.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.expand", "navigation.top", "content.code.copy", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"provider": "mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      
+    
+  </body>
+</html>
