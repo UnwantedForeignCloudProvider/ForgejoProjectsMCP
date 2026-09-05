@@ -105,9 +105,56 @@ uv build                   # must produce dist/*.whl and dist/*.tar.gz
 
 > Note: the tests here are offline unit/contract tests. They do **not** exercise
 > a live Forgejo instance. A green suite means the code and packaging are sound,
-> not that the tool was re-verified against a real server.
+> not that the tool was re-verified against a real server. That is what 2.3 is
+> for — do not treat 2.2 as sufficient on its own.
 
-### 2.3 Decide the version (SemVer)
+### 2.3 Integration gate against real Forgejo instances (all must pass)
+
+The package talks to undocumented internal web routes, so a green offline suite
+proves only that the code agrees with its own fixtures. Every release must also
+be verified against real, throwaway Forgejo instances. Requires a working Docker
+daemon (`docker version`); the suite starts and tears down the containers itself
+and never touches a forge you own.
+
+```bash
+uv run pytest -m integration \
+  --forgejo-version 1.20 --forgejo-version 13 --forgejo-version 14 \
+  --forgejo-version 15 --forgejo-version 16
+```
+
+**All five are required.** They serve two different purposes and neither set
+substitutes for the other:
+
+- **1.20 and 13** cover the version-specific behavior in `compat.py`: 1.20
+  matches all three quirks, 13 only the CSRF one. CI's matrix is 14, 15 and 16,
+  none of which has a quirk in force, so **a push never exercises the quirked
+  paths** — this gate is the only place they are checked.
+- **14, 15 and 16** are the releases still in support, so they are what people
+  actually run. A release must verify them here directly rather than trusting
+  that CI covered them: CI runs a *branch*, not the tagged commit, and a green
+  CI run from earlier is not evidence about the artifact being published.
+
+Expect this to take a while: each version pulls an image, boots a container,
+seeds an admin, a repository, issues and a milestone, then runs the whole suite.
+Run it in the background rather than under a short timeout.
+
+❌ STOP if any version fails, including on a version whose only failure is in a
+quirked path. A quirk regression is invisible to CI and to the offline suite.
+
+Notes:
+
+- Nothing runs by default: with no `--forgejo-version` and no `FORGEJO_TEST_URL`,
+  every integration test skips. A green `uv run pytest -q` in 2.2 does **not**
+  mean these ran.
+- `FORGEJO_TEST_URL` is not a substitute for this gate. An instance you manage is
+  treated as not disposable, so the tests that create or delete data skip unless
+  `FORGEJO_TEST_ALLOW_WRITES=1` — a run against it can look green while having
+  exercised almost nothing.
+- Widen the sweep to the full spread (`1.20`, `1.21`, and every major from 7 to
+  16) when the release changed `compat.py`, a route, or a parser. Never narrow
+  it below the five above.
+
+### 2.4 Decide the version (SemVer)
 
 Pick `X.Y.Z` based on what changed since the last tag (`git describe --tags`):
 
@@ -119,7 +166,7 @@ Pick `X.Y.Z` based on what changed since the last tag (`git describe --tags`):
 - Pre-releases use PEP 440 spellings on the tag: `v1.0.0rc1`, `v1.0.0b1`,
   `v1.0.0a1`. The workflow marks these as GitHub *pre-releases* automatically.
 
-### 2.4 Check for documentation drift (and fix it)
+### 2.5 Check for documentation drift (and fix it)
 
 Docs must match the code being released. Verify each of these and **update the
 docs (and commit) before releasing** if anything is stale:
@@ -163,7 +210,7 @@ docs (and commit) before releasing** if anything is stale:
 
 If you changed docs, include them in the release commit (below).
 
-### 2.5 Update the changelog
+### 2.6 Update the changelog
 
 - [ ] In `CHANGELOG.md`, move the items under `## [Unreleased]` into a new
       section headed **exactly**:
@@ -174,11 +221,11 @@ If you changed docs, include them in the release commit (below).
   The release workflow extracts the notes for tag `vX.Y.Z` from the matching
   `## [X.Y.Z]` heading, so the heading format must be exact.
 - [ ] Leave a fresh, empty `## [Unreleased]` section above it.
-- [ ] Commit the changelog **and any doc updates from 2.4**:
+- [ ] Commit the changelog **and any doc updates from 2.5**:
       `git add CHANGELOG.md README.md .env.example .agents docs && git commit -m "chore: release X.Y.Z"`
       (drop paths you didn't change).
 
-### 2.6 Preview the version that will be built
+### 2.7 Preview the version that will be built
 
 The tag is not created yet, so this previews the *next-commit* version; the real
 check happens in CI after tagging. Confirm the base looks right:
@@ -254,8 +301,11 @@ local tag).
 ## Quick reference
 
 ```bash
-# validate
+# validate (offline)
 uv sync --dev && uv run ruff check . && uv run ty check && uv run pytest -q && uv build
+# validate (real instances — quirk combinations + every supported release; needs Docker, ~11 min)
+uv run pytest -m integration --forgejo-version 1.20 --forgejo-version 13 \
+  --forgejo-version 14 --forgejo-version 15 --forgejo-version 16
 # changelog: move Unreleased -> "## [X.Y.Z] - $(date -u +%Y-%m-%d)", commit
 # release (after approval)
 git tag vX.Y.Z && git push origin vX.Y.Z
