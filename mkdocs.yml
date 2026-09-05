@@ -60,4 +60,3 @@ nav:
       - client.py: reference/client.md
       - server.py: reference/server.md
   - Endpoint reference: forgejo-projects-automation-reference.md
-  - Releasing: RELEASING.md

@@ -1,10 +1,15 @@
+---
+name: release-forgejo-projects-mcp
+description: Prepare, publish, or verify a tag-driven forgejo-projects-mcp release or prerelease. Use when asked to choose a version, run release checks, update release notes, publish to PyPI and GitHub, deploy versioned documentation, or diagnose a failed release workflow.
+---
+
 # Release procedure
 
 Notes:
 
-- explicitely shipped in public docs for simplicity
+- This runbook is maintainer-facing and intentionally excluded from public docs.
 
-- if you're a regular user, you can safely ignore this page
+- If you're a regular user, you can safely ignore this skill.
 
 A step-by-step runbook for cutting a release of **forgejo-projects-mcp**.
 Written to be followed by an AI agent, but equally usable by a human.

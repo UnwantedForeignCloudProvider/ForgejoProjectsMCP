@@ -25,7 +25,6 @@ It can:
 | Understand the modules and request lifecycle | [Architecture](architecture.md) |
 | Look up a Python module | [Python API reference](reference/index.md) |
 | Inspect the Forgejo web routes behind the client | [Automation reference](forgejo-projects-automation-reference.md) |
-| Cut a release | [Release procedure](RELEASING.md) |
 
 ## Requirements
 
