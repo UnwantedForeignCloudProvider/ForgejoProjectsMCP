@@ -98,7 +98,7 @@ Projects and columns use repository paths such as:
 
 Issues and milestones also use web pages. For a route that needs a global issue ID, the client first fetches `/{owner}/{repo}/issues/{number}` and extracts `data-issue-id`. Project board HTML supplies card issue IDs and repository numbers through `data-issue` and issue links.
 
-The exact methods, paths, and observed Forgejo v15.0.7 behavior are recorded in the [automation reference](forgejo-projects-automation-reference.md).
+The exact methods, paths, and the behavior observed on each supported release are recorded in the [automation reference](forgejo-projects-automation-reference.md).
 
 ## Version adaptation
 
@@ -244,14 +244,33 @@ suite against both the oldest and newest supported release
 
 ## Limitations and risk
 
-This architecture is intentionally a stop-gap:
+Forgejo exposes no API for Projects/Kanban, so this tool resorts to browser-style
+automation: it logs in with a username and password, keeps a session cookie, and
+calls Forgejo's internal web routes, scraping HTML to recover ids and board
+state. That is a fragile approach by nature, and this architecture is
+intentionally a stop-gap:
 
-- the routes and HTML selectors are undocumented and unversioned;
-- parsing depends on markup and regular expressions;
-- username/password authentication is broader than a scoped token;
+- the routes and HTML selectors are **not a public contract** — they are
+  undocumented and unversioned, so a Forgejo upgrade (even a minor one) can
+  change markup or routes and silently break tools here;
+- state is recovered by HTML scraping and regular expressions rather than a
+  structured API, so parsing can drift;
+- it authenticates as a **real user with a password**, not a scoped API token,
+  which grants far more than the operations it performs;
 - session state is stored locally as a sensitive cookie file;
-- writes do not have a cross-request transaction or rollback;
-- a failed multi-step operation may leave partial state; and
-- the code was verified against one Forgejo instance/version.
+- writes have no cross-request transaction or rollback, so a failed multi-step
+  operation may leave partial state; and
+- version adaptation covers the releases the integration suite exercises
+  (1.20, 1.21 and majors 7 through 16). A newer release may need a new quirk,
+  and an instance outside that window falls back to the newest known behavior
+  without any guarantee that it fits.
 
-Use the official Forgejo API for operations it supports when building a broader integration. If Forgejo ships a stable Projects API, the client should migrate to it rather than expanding the scraper.
+Version detection and the quirk registry take some of the sting out of the first
+two points — known differences are handled and regressions are caught early by
+the live suite — but they do not make the approach robust.
+
+Treat it as a best-effort convenience for personal or experimental use. Do not
+put it on a critical path, run it against data you cannot afford to lose, or
+depend on it for production workflows. Use the official Forgejo API for
+operations it supports when building a broader integration, and if Forgejo ships
+a stable Projects API, migrate to it rather than expanding the scraper.

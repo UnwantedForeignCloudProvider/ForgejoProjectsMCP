@@ -12,7 +12,7 @@ It can:
 - create and manage milestones; and
 - expose the same operations through a generated command-line interface.
 
-> **Important:** this is a best-effort automation layer over undocumented Forgejo web routes. It was verified against Forgejo **v15.0.7**, not a versioned Projects API. Test it against a disposable repository before using it for important data. Read [Architecture](architecture.md#limitations-and-risk) and the [security policy](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/SECURITY.md) before deploying it.
+> **Important:** this is a best-effort automation layer over undocumented Forgejo web routes, not a versioned Projects API. It is verified against every published release from **1.20 through 16**, but those routes can change in any future one. Test it against a disposable repository before using it for important data. Read [Architecture](architecture.md#limitations-and-risk) and the [security policy](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/SECURITY.md) before deploying it.
 
 ## Choose a path
 

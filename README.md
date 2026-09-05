@@ -6,36 +6,23 @@ which Forgejo does **not** expose over its REST API.
 It works by driving the same internal web routes the browser uses, authenticated
 with a session cookie. HTTP is done through Playwright's `APIRequestContext`, so
 **no browser binary is downloaded** — only the `playwright` Python package is
-needed. See `forgejo-projects-automation-reference.md` for the reverse-engineered
-endpoints this is built on.
+needed. See the [automation reference](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/forgejo-projects-automation-reference.md)
+for the reverse-engineered endpoints this is built on.
 
 ## ⚠️ This is a janky backend — do not rely on it for production
 
-Forgejo exposes **no API** for Projects/Kanban, so this tool resorts to
-**browser-style automation**: it logs in with a username and password, keeps a
-session cookie, and calls Forgejo's **undocumented, unversioned internal web
-routes** — scraping HTML to recover ids and board state. That is a fragile
-approach by nature:
+Forgejo exposes **no API** for Projects/Kanban, so this tool logs in as a real
+user and drives **undocumented, unversioned internal web routes**, scraping HTML
+for ids and board state. A Forgejo upgrade can change that markup and break
+things.
 
-- These routes are **not a public contract**. A Forgejo upgrade (even a minor one)
-  can change markup or routes and silently break tools here.
-- State is recovered by **HTML scraping and regex**, not a structured API, so
-  parsing can drift.
-- It authenticates as a **real user with a password**, not a scoped API token,
-  and performs writes with no transactional guarantees.
+The client adapts to the instance version, and every published release from 1.20
+to 16 is exercised end to end by an automated integration suite — but that only
+means known differences are handled, not that the approach is robust. Treat it
+as a best-effort stop-gap for personal use, test against a throwaway repo, and
+migrate if Forgejo ships a real Projects API.
 
-To take some of the sting out of that, the client detects the instance version
-(from the same response that checks the session, so it costs no extra request)
-and adapts its routes, parsing and CSRF handling to it. **Every published Forgejo
-release from 1.20 to 16** is exercised end to end by an automated integration
-suite that boots a throwaway instance per version. That does not make the approach robust — it
-just means known differences are handled and regressions are caught early.
-
-Treat it as a **best-effort convenience / stop-gap for personal or experimental
-use**. Do **not** put it on a critical path, run it against data you can't afford
-to lose, or depend on it for production workflows. If/when Forgejo ships a real
-Projects API, migrate to it. Use at your own risk; test against a throwaway repo
-first.
+Details: [Limitations and risk](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/architecture.md#limitations-and-risk).
 
 ## Prerequisites
 
@@ -102,19 +89,10 @@ python-dotenv) — copy `.env.example` to `.env` and fill it in; no `source`/
 optional `FORGEJO_MCP_MAX_CONCURRENCY`, `FORGEJO_MCP_RPS`, and
 `FORGEJO_MCP_LOG_LEVEL`.
 
-The authenticated session is cached at
-`<config>/forgejo_projects_mcp/storage_state.json` and refreshed automatically
-when it expires. Alongside it, the non-secret connection settings (instance URL
-and username) are persisted to `<config>/forgejo_projects_mcp/config.json` after
-a successful login. `<config>` is `$XDG_CONFIG_HOME` if set, otherwise `~/.config`
-— resolved in an OS-agnostic way (Linux, macOS, Windows) via `Path.home()`.
-
-Because the URL and username are persisted, **after the first successful login no
-environment variables are required at all** — the cached session plus
-`config.json` are enough. The password is **never** written to disk: it is
-requested again (via env var, CLI option, or interactive prompt) only when
-Forgejo requires a fresh login. Environment variables always take precedence over
-`config.json`.
+The session and the non-secret connection settings are cached under
+`<config>/forgejo_projects_mcp/`, so **after the first successful login no
+environment variables are required**. The password is never written to disk.
+See [Configuration](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/configuration.md).
 
 ## Run
 
@@ -290,13 +268,6 @@ explicit. `bulk_read_issues` returns `count` (successful only) plus a separate
 rate are tunable via `FORGEJO_MCP_MAX_CONCURRENCY` (default 8) and
 `FORGEJO_MCP_RPS` (default 5).
 
-**Error signaling.** Tool failures are returned as MCP errors (`isError: true`)
-with a `[CODE] message` (e.g. `[NOT_FOUND]`, `[INVALID_STATE]`,
-`[MILESTONE_NOT_FOUND]`, `[NETWORK_ERROR]`) — agents can detect failure without
-parsing content. Invalid `state` values and missing projects/columns/milestones/
-issues are hard errors, not silent empty results. Individual issues that fail to
-read inside a bulk call are reported inline instead (partial success).
-
 **Milestones**
 - `list_milestones`, `create_milestone`, `edit_milestone`,
   `close_milestone`, `reopen_milestone`, `delete_milestone`
@@ -325,11 +296,8 @@ tool name**:
 Precedence is **CLI option > env var > persisted `config.json`**. `--forgejo-password`
 and `--forgejo-password-stdin` are mutually exclusive.
 
-When stdin and stderr are attached to a terminal, missing or rejected
-credentials are requested interactively. Password input is hidden, and login is
-retried up to three times. Prompted credentials stay in memory; only the normal
-session state and non-secret `config.json` are saved. Piped/automated CLI
-invocations and the `forgejo-projects-mcp` stdio server never prompt.
+Terminal sessions are prompted for missing or rejected credentials; piped
+invocations and the MCP server never are.
 
 ```bash
 forgejo-projects-cli --help                      # lists every tool
@@ -350,14 +318,11 @@ printf '%s\n' "$FORGEJO_PW" | forgejo-projects-cli \
 Options mirror each tool's parameters (`--owner`, `--repo`, …); list/object
 parameters (`--issue_numbers`, `--moves`) take a JSON string.
 
-## Notes
+## Documentation
 
-- Verified against Forgejo **1.20, 1.21 and majors 7 through 16** — every
-  published release — each exercised end to end by the integration suite
-  (`uv run pytest -m integration --forgejo-version N`, which starts the instance
-  for you). The web routes are internal and unversioned, so a future release may
-  still need a new entry in `compat.py`.
-- `forgejo_status` reports the detected version, the behavior in force for it,
-  and whether that version is one the suite covers.
-- The Forgejo session cookie does **not** authorize `/api/v1`, so everything runs
-  through the web routes.
+[Getting started](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/getting-started.md)
+· [Configuration](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/configuration.md)
+· [Tools](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/tools.md)
+· [CLI](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/cli.md)
+· [Architecture](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/architecture.md)
+· [Automation reference](https://github.com/UnwantedForeignCloudProvider/ForgejoProjectsMCP/blob/main/docs/forgejo-projects-automation-reference.md)
