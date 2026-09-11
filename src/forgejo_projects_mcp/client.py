@@ -97,6 +97,20 @@ _MAX_CONCURRENCY = max(1, int(os.environ.get("FORGEJO_MCP_MAX_CONCURRENCY", "8")
 _REQUESTS_PER_SECOND = max(0.1, float(os.environ.get("FORGEJO_MCP_RPS", "5")))
 _MAX_RATE_RETRIES = 2
 
+# How long any single request may take before it is reported as unreachable.
+# Playwright would otherwise apply its own implicit 30s default, which meant an
+# instance that accepts connections but never answers -- a stalled proxy, a URL
+# pointing somewhere unrelated -- looked like a hang to the caller with no
+# documented bound and no way to shorten it. Callers that would rather fail fast
+# (an agent probing whether an instance is reachable at all) can lower it.
+_TIMEOUT_SECONDS = max(1.0, float(os.environ.get("FORGEJO_MCP_TIMEOUT", "30")))
+
+# Forgejo paginates its project and milestone list pages at 20 entries and gives
+# no total, so the client walks the pages itself. The cap only exists so that a
+# server that ignored `page` (and kept returning the same rows) could not spin
+# forever; it is far above any realistic repository, and reaching it is logged.
+_MAX_LIST_PAGES = 50
+
 _VALID_STATES = ("open", "closed", "all")
 
 
@@ -304,6 +318,7 @@ class ForgejoClient:
         kwargs: dict[str, Any] = {
             "base_url": self.base_url,
             "extra_http_headers": {"Origin": self.base_url},
+            "timeout": _TIMEOUT_SECONDS * 1000,
         }
         if cached_state:
             kwargs["storage_state"] = str(STATE_FILE)
@@ -781,6 +796,186 @@ class ForgejoClient:
         )
         return body
 
+    # ------------------------------------------------------- write integrity
+    async def _write(
+        self, route_name: str, method: str, path: str, **kwargs: Any
+    ) -> Any:
+        """Perform a write and refuse to pass a refusal off as a success.
+
+        Forgejo's form routes answer an accepted write with a redirect and a
+        *rejected* one by re-rendering the form as HTTP 200 with a flash error.
+        Both are below 400, so a plain request cannot tell them apart -- which is
+        how an impossible deadline or an empty title used to come back as
+        ``created: true``. For the routes that redirect on success
+        (``Profile.redirect_writes``), anything else is reported as the
+        rejection it is, carrying Forgejo's own message where it renders one.
+        """
+        r = await self._request(method, path, follow=False, **kwargs)
+        if route_name not in self._profile.redirect_writes:
+            return r
+        if r.status in _REDIRECTS:
+            return r
+        detail = ""
+        try:
+            m = self._profile.search("form_error", await r.text())
+            if m:
+                detail = f": {unescape(m.group(1).strip())}"
+        except Exception as exc:  # a rejection we cannot read is still a rejection
+            logger.debug(
+                "Form-error parsing failed path=%s error_type=%s",
+                _log_path(path),
+                type(exc).__name__,
+            )
+        logger.info("Forgejo refused %s %s%s", method, _log_path(path), detail)
+        raise ForgejoError(
+            f"Forgejo rejected {method} {path} and made no change{detail}",
+            status=422,
+            code="REJECTED",
+        )
+
+    @staticmethod
+    def _require_title(value: str | None, what: str) -> str:
+        """Reject a blank title before it reaches Forgejo.
+
+        Forgejo accepts an empty project or column title and creates a resource
+        that its own list pages then omit, which leaves an agent unable to see
+        or address what it just made. Milestones are refused upstream instead.
+        Neither is a useful outcome, so all three are refused here.
+        """
+        if value is None or not value.strip():
+            raise ForgejoError(
+                f"A {what} title must not be empty or whitespace only.",
+                status=400,
+                code="INVALID_INPUT",
+            )
+        return value
+
+    def _require_color(self, color: str | None) -> str | None:
+        """Reject a color Forgejo would answer with a bare HTTP 500.
+
+        The accepted shape is a profile contract (``column_color``) because it
+        is a Forgejo form value, not a rule of this client's own.
+        """
+        if color is None or color == "":
+            return color
+        pattern = self._profile.compiled("column_color")[0]
+        if not pattern.fullmatch(color):
+            raise ForgejoError(
+                f"Invalid column color {color!r}; expected a hex value such as "
+                "'#e01e5a' (Forgejo answers anything else with HTTP 500).",
+                status=400,
+                code="INVALID_INPUT",
+            )
+        return color
+
+    @staticmethod
+    def _require_unique_numbers(numbers: list[int], what: str) -> None:
+        """Refuse a batch that contradicts itself.
+
+        Cards headed to two different columns in one request were both applied,
+        concurrently, and the reply claimed both destinations while the card
+        ended up in whichever write landed last. There is no coherent result to
+        report for such a batch, so it is refused instead.
+        """
+        duplicates = sorted({n for n in numbers if numbers.count(n) > 1})
+        if duplicates:
+            raise ForgejoError(
+                f"Issue number(s) {duplicates} appear more than once in one "
+                f"{what}; a card cannot be in two places at once.",
+                status=400,
+                code="INVALID_INPUT",
+            )
+
+    def _card_type_value(self, card_type: str) -> str:
+        """Map a public card-type name to the value Forgejo's form posts."""
+        try:
+            return self._profile.card_types[card_type]
+        except KeyError:
+            valid = ", ".join(sorted(self._profile.card_types))
+            raise ForgejoError(
+                f"Unknown card_type {card_type!r}; valid values are {valid}.",
+                status=400,
+                code="INVALID_INPUT",
+            ) from None
+
+    async def _require_column(self, owner, repo, project_id, column_id) -> None:
+        """Fail with a specific not-found before a route answers a generic 500.
+
+        Forgejo returns HTTP 500 for an unknown column id on edit, delete and
+        set-default alike, which says nothing about what was wrong -- and on
+        delete it is the same 500 it uses for "that is the default column", so
+        the two were indistinguishable. Reading the board first separates them.
+        A column that exists but belongs to another project is left to Forgejo,
+        which explains that case itself with a usable HTTP 422.
+        """
+        board = await self.get_project(owner, repo, project_id)
+        if not any(c["id"] == column_id for c in board["columns"]):
+            raise ForgejoError(
+                f"Column {column_id} is not on project {project_id}.",
+                status=404,
+                code="COLUMN_NOT_FOUND",
+            )
+
+    async def _require_cards(self, owner, repo, project_id, numbers) -> None:
+        """Fail clearly when an issue being moved is not a card on this board.
+
+        Forgejo answers a move for an issue that is not attached to the project
+        with a bare HTTP 500, which reads as a server fault rather than the
+        addressing mistake it is. The board already has to be readable for the
+        move to mean anything, so it is read first and the missing numbers are
+        named.
+        """
+        board = await self.get_project(owner, repo, project_id)
+        on_board = {
+            card["number"] for column in board["columns"] for card in column["cards"]
+        }
+        missing = sorted({n for n in numbers if n not in on_board})
+        if missing:
+            raise ForgejoError(
+                f"Issue(s) {missing} are not cards on project {project_id}; "
+                "attach them with add_issues_to_project first.",
+                status=404,
+                code="CARD_NOT_FOUND",
+            )
+
+    async def _require_reference(
+        self, owner, repo, value: int, label: str, code: str, lookup
+    ) -> None:
+        """Fail when a filter names something that does not exist.
+
+        The issues list applies ``project`` and ``milestone`` as direct values
+        and simply matches nothing for an id it does not know, so an unusable
+        filter produced an ordinary empty result -- indistinguishable from a
+        board that genuinely has no matching issues, and the reason an agent
+        could conclude that work had vanished. The id is confirmed first.
+        """
+        known = await lookup(owner, repo, state="all")
+        if not any(item["id"] == value for item in known):
+            raise ForgejoError(
+                f"{label} {value} does not exist in {owner}/{repo}; "
+                "the filter matched nothing because the id is unusable.",
+                status=404,
+                code=code,
+            )
+
+    @staticmethod
+    def _created(match: list[dict[str, Any]], what: str, title: str) -> dict[str, Any]:
+        """Return the newly created resource, or say plainly that it is unknown.
+
+        Recovery is by title because Forgejo's redirect points at the collection
+        rather than the new resource. A write that was accepted but cannot be
+        matched back must not be reported as a plain success: the old fallback
+        returned some *other* project, so a follow-up mutation could target the
+        wrong board.
+        """
+        if match:
+            return match[-1]
+        raise ForgejoError(
+            f"Forgejo accepted the {what} {title!r} but it could not be found "
+            f"afterwards; it may exist. Re-read the {what} list before retrying.",
+            code="CREATE_UNVERIFIED",
+        )
+
     # ---------------------------------------------------------- repositories
     async def list_repositories(
         self, query: str = "", limit: int = 50, page: int = 1
@@ -896,13 +1091,63 @@ class ForgejoClient:
         return int(m.group(1))
 
     # -------------------------------------------------------------- projects
+    async def _list_paged(
+        self,
+        route_name: str,
+        parse: Callable[[str, Profile], list[dict[str, Any]]],
+        owner: str,
+        repo: str,
+        state: str,
+    ) -> list[dict[str, Any]]:
+        """Walk a paginated list page and return every entry, not just page 1.
+
+        Forgejo shows 20 projects or milestones per page and publishes no total,
+        so a single request silently returns a prefix of the list -- which made
+        an existing resource look absent, and (because creates verify themselves
+        by title against this list) could report a successful create as
+        unverified. Pages are walked until one comes back empty or stops adding
+        ids; both guards matter, since a server that clamped an out-of-range
+        page to the last one would otherwise repeat forever.
+        """
+        found: dict[int, str] = {}
+        page = 1
+        while page <= _MAX_LIST_PAGES:
+            html = await self._get_text(
+                self._route(route_name, owner=owner, repo=repo),
+                params={"state": state, "page": str(page)},
+            )
+            entries = parse(html, self._profile)
+            added = 0
+            for entry in entries:
+                current = found.get(entry["id"])
+                # Same rule the per-page parsers use: keep the longest title
+                # rendered for an id.
+                if current is None or len(entry["title"]) > len(current):
+                    found[entry["id"]] = entry["title"]
+                    added += current is None
+            if not entries or not added:
+                break
+            page += 1
+        else:
+            logger.warning(
+                "Stopped listing %s for %s/%s at the %d-page cap; the result may "
+                "be incomplete.",
+                route_name,
+                owner,
+                repo,
+                _MAX_LIST_PAGES,
+            )
+        logger.debug(
+            "Listed %s pages_read=%d entries=%d", route_name, page, len(found)
+        )
+        return [{"id": i, "title": t} for i, t in sorted(found.items())]
+
     async def _list_projects_state(
         self, owner: str, repo: str, state: str
     ) -> list[dict[str, Any]]:
-        html = await self._get_text(
-            self._route("projects", owner=owner, repo=repo), params={"state": state}
+        return await self._list_paged(
+            "projects", self._parse_projects_list, owner, repo, state
         )
-        return self._parse_projects_list(html, self._profile)
 
     async def list_projects(
         self, owner: str, repo: str, state: str = "open"
@@ -926,8 +1171,10 @@ class ForgejoClient:
         description: str = "",
         card_type: str = "text",
     ) -> dict[str, Any]:
-        ct = self._profile.card_types.get(card_type, str(card_type))
-        await self._request(
+        self._require_title(title, "project")
+        ct = self._card_type_value(card_type)
+        await self._write(
+            "project_new",
             "POST",
             self._route("project_new", owner=owner, repo=repo),
             form={
@@ -937,13 +1184,12 @@ class ForgejoClient:
                 "template_type": "",
                 "card_type": ct,
             },
-            follow=False,
         )
-        # Recover the new id (highest id whose title matches).
+        # Recover the new id (highest id whose title matches). The list page
+        # renders titles stripped, so compare against the stripped title.
         projects = await self.list_projects(owner, repo, state="open")
-        match = [p for p in projects if p["title"] == title]
-        new = match[-1] if match else (projects[-1] if projects else None)
-        return {"created": True, "project": new}
+        match = [p for p in projects if p["title"] == title.strip()]
+        return {"created": True, "project": self._created(match, "project", title)}
 
     async def get_project(
         self, owner: str, repo: str, project_id: int
@@ -970,23 +1216,32 @@ class ForgejoClient:
         )
         cur_title = self._profile.search("project_edit_title", html)
         cur_ct = self._profile.search("project_edit_card_type", html)
-        ct_map = self._profile.card_types
-        new_title = title if title is not None else (cur_title.group(1) if cur_title else "")
-        if card_type:
-            new_ct = ct_map.get(card_type, card_type)
+        cur_desc = self._profile.search("project_edit_description", html)
+        new_title = title if title is not None else (
+            unescape(cur_title.group(1)) if cur_title else ""
+        )
+        self._require_title(new_title, "project")
+        if card_type is not None:
+            new_ct = self._card_type_value(card_type)
         else:
-            new_ct = cur_ct.group(1) if cur_ct else "1"
+            new_ct = cur_ct.group(1) if cur_ct else self._profile.card_types["text"]
+        # The edit form is a full replacement: a field left out of the request
+        # is cleared, not kept. Every value the caller did not supply is
+        # therefore carried over from the form we just read.
+        new_desc = description if description is not None else (
+            unescape(cur_desc.group(1)) if cur_desc else ""
+        )
         form = {
             "redirect": "",
             "title": new_title,
-            "content": description if description is not None else "",
+            "content": new_desc,
             "card_type": new_ct,
         }
-        await self._request(
+        await self._write(
+            "project_edit",
             "POST",
             self._route("project_edit", owner=owner, repo=repo, project_id=project_id),
             form=form,
-            follow=False,
         )
         return {"updated": True, "project_id": project_id}
 
@@ -1025,6 +1280,11 @@ class ForgejoClient:
     async def create_column(
         self, owner, repo, project_id, title, color: str = ""
     ) -> dict[str, Any]:
+        self._require_title(title, "column")
+        self._require_color(color)
+        # Not a _write: this route answers a success with 200 and {"ok": true},
+        # so there is no redirect to confirm. The board read below is the
+        # confirmation instead.
         await self._request(
             "POST",
             self._route("column_new", owner=owner, repo=repo, project_id=project_id),
@@ -1032,18 +1292,24 @@ class ForgejoClient:
             follow=False,
         )
         board = await self.get_project(owner, repo, project_id)
-        match = [c for c in board["columns"] if c["title"] == title]
-        return {"created": True, "column": (match[-1] if match else None)}
+        match = [c for c in board["columns"] if c["title"] == title.strip()]
+        return {"created": True, "column": self._created(match, "column", title)}
 
     async def edit_column(
         self, owner, repo, project_id, column_id,
         title: str | None = None, color: str | None = None,
     ) -> dict[str, Any]:
+        # Unlike the project and milestone edit forms, this route is a genuine
+        # partial update -- a PUT carrying only a color leaves the title alone
+        # (verified live on 1.20 and 16) -- so only the named fields are sent.
+        # Arguments are checked before the board read, so bad input costs no
+        # request at all.
         form: dict[str, str] = {}
         if title is not None:
-            form["title"] = title
+            form["title"] = self._require_title(title, "column")
         if color is not None:
-            form["color"] = color
+            form["color"] = self._require_color(color) or ""
+        await self._require_column(owner, repo, project_id, column_id)
         await self._request(
             "PUT",
             self._route(
@@ -1059,6 +1325,9 @@ class ForgejoClient:
         return {"updated": True, "column_id": column_id}
 
     async def delete_column(self, owner, repo, project_id, column_id) -> dict[str, Any]:
+        # Only a column that really exists should get the default-column
+        # explanation below; an unknown id answers with the very same HTTP 500.
+        await self._require_column(owner, repo, project_id, column_id)
         try:
             await self._request(
                 "DELETE",
@@ -1083,6 +1352,7 @@ class ForgejoClient:
     async def set_default_column(
         self, owner, repo, project_id, column_id
     ) -> dict[str, Any]:
+        await self._require_column(owner, repo, project_id, column_id)
         await self._request(
             "POST",
             self._route(
@@ -1107,6 +1377,15 @@ class ForgejoClient:
     async def add_issues_to_project(
         self, owner, repo, project_id, issue_numbers: list[int]
     ) -> dict[str, Any]:
+        """Attach issues to a board and confirm they became cards.
+
+        Unlike the move route, which answers with an explicit ``{"ok": true}``,
+        this one reports nothing a caller can check: a write that changed
+        nothing answers exactly like one that worked. So the board is read back
+        and each issue is confirmed to be a card, with the column it landed in
+        named in the result. Without that, "attached" meant only "Forgejo did
+        not refuse the form", which is indistinguishable from silent failure.
+        """
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         await self._request(
             "POST",
@@ -1114,11 +1393,47 @@ class ForgejoClient:
             form={"id": str(project_id), "issue_ids": ",".join(map(str, ids))},
             follow=False,
         )
-        return {"attached": issue_numbers, "project_id": project_id}
+        board = await self.get_project(owner, repo, project_id)
+        placed = {
+            card["number"]: column
+            for column in board["columns"]
+            for card in column["cards"]
+        }
+        missing = sorted({n for n in issue_numbers if n not in placed})
+        if missing:
+            raise ForgejoError(
+                f"Forgejo accepted the attachment but issue(s) {missing} are not "
+                f"cards on project {project_id}; they may still have been "
+                f"attached. Re-read the board before retrying.",
+                code="ATTACH_UNVERIFIED",
+            )
+        return {
+            "attached": issue_numbers,
+            "project_id": project_id,
+            "cards": [
+                {
+                    "number": n,
+                    "column_id": placed[n]["id"],
+                    "column_title": placed[n]["title"],
+                }
+                for n in issue_numbers
+            ],
+        }
 
     async def remove_issues_from_project(
-        self, owner, repo, issue_numbers: list[int]
+        self, owner, repo, issue_numbers: list[int], project_id: int | None = None
     ) -> dict[str, Any]:
+        """Detach issues from every board they are on.
+
+        ``project_id`` is a guard, not a scope: Forgejo clears an issue's
+        project assignment outright and an issue is only ever on one board, so
+        there is no scoped variant to offer. Naming a project instead asserts
+        which board the caller believes the issues are on, and refuses the
+        write when they are somewhere else -- the mistake the tool's name
+        invites.
+        """
+        if project_id is not None:
+            await self._require_cards(owner, repo, project_id, issue_numbers)
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         await self._request(
             "POST",
@@ -1131,6 +1446,8 @@ class ForgejoClient:
     async def move_card(
         self, owner, repo, project_id, column_id, issue_numbers: list[int]
     ) -> dict[str, Any]:
+        self._require_unique_numbers(issue_numbers, "move")
+        await self._require_cards(owner, repo, project_id, issue_numbers)
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         payload = {
             "issues": [
@@ -1181,12 +1498,17 @@ class ForgejoClient:
             form["label_ids"] = ",".join(map(str, label_ids))
         if assignee_ids:
             form["assignee_ids"] = ",".join(map(str, assignee_ids))
-        r = await self._request(
-            "POST",
-            self._route("issue_new", owner=owner, repo=repo),
-            form=form,
-            follow=False,
-        )
+        try:
+            r = await self._request(
+                "POST",
+                self._route("issue_new", owner=owner, repo=repo),
+                form=form,
+                follow=False,
+            )
+        except ForgejoError as e:
+            raise await self._diagnose_issue_create(
+                owner, repo, e, project_id, milestone_id
+            ) from e
         number = None
         for source, raw in await self._created_issue_paths(r):
             num_m = self._profile.search("created_issue_number", raw)
@@ -1197,6 +1519,55 @@ class ForgejoClient:
         if number is None:
             logger.debug("Create-issue response carried no issue number")
         return {"created": True, "number": number, "title": title}
+
+    async def _diagnose_issue_create(
+        self,
+        owner,
+        repo,
+        error: ForgejoError,
+        project_id: int | None,
+        milestone_id: int | None,
+    ) -> ForgejoError:
+        """Explain the HTTP 500 that a bad sidebar reference produces.
+
+        Forgejo validates the new-issue form's project, milestone and assignees
+        only when it applies them, and a value it cannot resolve surfaces as an
+        error naming nothing -- and not even the same one: an unknown project is
+        HTTP 404 on Forgejo 16 but part of the same bare HTTP 500 on 1.20. So a
+        reference the client can look up is confirmed missing and named, giving
+        one stable code on every release, and a reference that checks out is left
+        with its original error. Relabelling only ever follows a lookup, so a
+        404 caused by something else (an unknown repository, say) keeps its own
+        meaning. Diagnosis runs only on failure, so a valid create costs no extra
+        request. No issue is created in any of these cases.
+        """
+        if error.status is None or error.status < 400:
+            return error
+        for value, label, code, lookup in (
+            (milestone_id, "Milestone", "MILESTONE_NOT_FOUND", self.list_milestones),
+            (project_id, "Project", "PROJECT_NOT_FOUND", self.list_projects),
+        ):
+            if value is None:
+                continue
+            try:
+                known = await lookup(owner, repo, state="all")
+            except ForgejoError:  # diagnosis must never replace the real error
+                return error
+            if not any(item["id"] == value for item in known):
+                return ForgejoError(
+                    f"{label} {value} does not exist in {owner}/{repo}; "
+                    "the issue was not created.",
+                    status=404,
+                    code=code,
+                )
+        if error.status < 500:
+            return error
+        return ForgejoError(
+            f"{error} (note: Forgejo reports an unusable milestone_id, "
+            "project_id or assignee_ids this way; the issue was not created).",
+            status=error.status,
+            code=error.code,
+        )
 
     @staticmethod
     async def _created_issue_paths(r) -> list[tuple[str, str]]:
@@ -1335,8 +1706,16 @@ class ForgejoClient:
     ) -> list[dict[str, Any]]:
         """Read many issues concurrently (rate-limited). Per-issue errors are
         returned inline as ``{"number": n, "error": ...}`` rather than aborting.
-        ``state`` ('open'/'closed'/'all') post-filters the results."""
+        ``state`` ('open'/'closed'/'all') post-filters the results.
+
+        A repeated issue number is read once. Duplicates used to be fetched and
+        returned once per occurrence, so a caller that assembled its list from
+        two overlapping sources paid for the overlap twice and then counted the
+        same issue twice. Unlike a batch of moves, a repeat here contradicts
+        nothing, so it is collapsed rather than refused.
+        """
         self._check_state(state)
+        numbers = list(dict.fromkeys(numbers))
         results = await asyncio.gather(
             *[self.read_issue(owner, repo, n) for n in numbers],
             return_exceptions=True,
@@ -1391,6 +1770,11 @@ class ForgejoClient:
                 status=404,
                 code="MILESTONE_NOT_FOUND",
             )
+        if project is not None:
+            await self._require_reference(
+                owner, repo, project, "Project", "PROJECT_NOT_FOUND",
+                self.list_projects,
+            )
         numbers = await self._filtered_issue_numbers(
             owner, repo, state=state, milestone=milestone_id, project=project
         )
@@ -1411,9 +1795,18 @@ class ForgejoClient:
         self, owner, repo, project_id, state: str, milestone: int | None
     ) -> set[int] | None:
         """The set of issue numbers matching state/milestone within a project, or
-        None when no server-side filter is active (meaning: allow everything)."""
+        None when no server-side filter is active (meaning: allow everything).
+
+        Only the caller's ``milestone`` is confirmed to exist: ``project_id`` is
+        the board being read, which ``get_project`` has already resolved.
+        """
         if state == "all" and milestone is None:
             return None
+        if milestone is not None:
+            await self._require_reference(
+                owner, repo, milestone, "Milestone", "MILESTONE_NOT_FOUND",
+                self.list_milestones,
+            )
         return set(
             await self._filtered_issue_numbers(
                 owner, repo, state=state, project=project_id, milestone=milestone
@@ -1508,6 +1901,8 @@ class ForgejoClient:
         are placed in the order given. Issue-id lookups and per-column moves run
         concurrently (rate-limited)."""
         numbers = [m["issue_number"] for m in moves]
+        self._require_unique_numbers(numbers, "bulk move")
+        await self._require_cards(owner, repo, project_id, numbers)
         ids = await asyncio.gather(
             *[self.resolve_issue_id(owner, repo, n) for n in numbers]
         )
@@ -1560,10 +1955,9 @@ class ForgejoClient:
         return result
 
     async def _list_milestones_state(self, owner, repo, state):
-        html = await self._get_text(
-            self._route("milestones", owner=owner, repo=repo), params={"state": state}
+        return await self._list_paged(
+            "milestones", self._parse_milestones, owner, repo, state
         )
-        return self._parse_milestones(html, self._profile)
 
     async def list_milestones(self, owner, repo, state: str = "open"):
         self._check_state(state)
@@ -1580,33 +1974,62 @@ class ForgejoClient:
     async def create_milestone(
         self, owner, repo, title, description: str = "", deadline: str = ""
     ) -> dict[str, Any]:
-        await self._request(
+        self._require_title(title, "milestone")
+        await self._write(
+            "milestone_new",
             "POST",
             self._route("milestone_new", owner=owner, repo=repo),
             form={"title": title, "content": description, "deadline": deadline},
-            follow=False,
         )
         ms = await self.list_milestones(owner, repo, state="open")
-        match = [m for m in ms if m["title"] == title]
-        return {"created": True, "milestone": (match[-1] if match else None)}
+        match = [m for m in ms if m["title"] == title.strip()]
+        return {"created": True, "milestone": self._created(match, "milestone", title)}
+
+    async def _milestone_form(self, owner, repo, milestone_id) -> dict[str, str]:
+        """The milestone's current title, description and deadline."""
+        html = await self._get_text(
+            self._route(
+                "milestone_edit", owner=owner, repo=repo, milestone_id=milestone_id
+            )
+        )
+        current = {}
+        for field_name, key in (
+            ("title", "milestone_edit_title"),
+            ("content", "milestone_edit_description"),
+            ("deadline", "milestone_edit_deadline"),
+        ):
+            m = self._profile.search(key, html)
+            current[field_name] = unescape(m.group(1)) if m else ""
+        return current
 
     async def edit_milestone(
         self, owner, repo, milestone_id,
         title: str | None = None, description: str | None = None,
         deadline: str | None = None,
     ) -> dict[str, Any]:
+        """Edit a milestone, leaving fields the caller did not name alone.
+
+        The edit route replaces the whole milestone, so anything omitted from
+        the form is cleared rather than kept -- and Forgejo refuses the entire
+        submission when the title comes through empty, which is why a
+        deadline-only edit used to report success and change nothing. Current
+        values are read back from the edit form and merged: ``None`` keeps a
+        field, and an empty string clears it.
+        """
+        current = await self._milestone_form(owner, repo, milestone_id)
         form = {
-            "title": title or "",
-            "content": description or "",
-            "deadline": deadline or "",
+            "title": current["title"] if title is None else title,
+            "content": current["content"] if description is None else description,
+            "deadline": current["deadline"] if deadline is None else deadline,
         }
-        await self._request(
+        self._require_title(form["title"], "milestone")
+        await self._write(
+            "milestone_edit",
             "POST",
             self._route(
                 "milestone_edit", owner=owner, repo=repo, milestone_id=milestone_id
             ),
             form=form,
-            follow=False,
         )
         return {"updated": True, "milestone_id": milestone_id}
 
@@ -1632,6 +2055,17 @@ class ForgejoClient:
         return await self._milestone_action(owner, repo, milestone_id, "open")
 
     async def delete_milestone(self, owner, repo, milestone_id):
+        # Forgejo answers this route with HTTP 200 and a redirect body whether
+        # or not the milestone existed, so a delete of something already gone is
+        # indistinguishable from a real one. The milestone is looked up first so
+        # that "deleted" means a milestone was actually removed.
+        existing = await self.list_milestones(owner, repo, state="all")
+        if not any(m["id"] == milestone_id for m in existing):
+            raise ForgejoError(
+                f"Milestone {milestone_id} does not exist in {owner}/{repo}.",
+                status=404,
+                code="MILESTONE_NOT_FOUND",
+            )
         # The real route is POST /{owner}/{repo}/milestones/delete?id=N
         # (NOT /milestones/{id}/delete, which 200s but does nothing).
         await self._request(

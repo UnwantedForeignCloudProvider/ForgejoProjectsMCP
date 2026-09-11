@@ -37,6 +37,10 @@ def probing_client(version: str, *, csrf: str | None = None, writes=None):
             return FakeResponse(status=200, text=page(version, csrf=csrf))
         if path in responses:
             return responses[path].pop(0)
+        if method == "GET" and path == "/o/r/milestones":
+            # Creates verify themselves by reading the collection back, so the
+            # milestone these tests write has to be visible afterwards.
+            return FakeResponse(status=200, text='<a href="/o/r/milestone/1">M</a>')
         return FakeResponse(status=303, headers={"location": "/"})
 
     return make_client(handler, authed=False)
@@ -180,6 +184,8 @@ def test_a_csrf_rejection_is_recovered_and_remembered():
             if attempts["count"] == 1:
                 return FakeResponse(status=400, text="Invalid CSRF token.")
             return FakeResponse(status=303, headers={"location": "/"})
+        if method == "GET" and path == "/o/r/milestones":
+            return FakeResponse(status=200, text='<a href="/o/r/milestone/1">M</a>')
         return FakeResponse(status=200, text="")
 
     client = make_client(handler, authed=False)

@@ -194,6 +194,35 @@ _PATTERNS: Mapping[str, tuple[str, ...]] = {
     # Project edit form (used to preserve fields the caller left unset).
     "project_edit_title": (r'name="title"[^>]*value="([^"]*)"',),
     "project_edit_card_type": (r'name="card_type"[^>]*value="([^"]*)"',),
+    "project_edit_description": (
+        r'<textarea[^>]*name="content"[^>]*>(.*?)</textarea>',
+    ),
+    # Milestone edit form, read for the same reason. The title and deadline are
+    # plain inputs on every release; the description became a Markdown editor in
+    # Forgejo 10, which moved `name="content"` behind other attributes, so the
+    # textarea is matched by its name rather than by attribute order.
+    "milestone_edit_title": (r'name="title"[^>]*value="([^"]*)"',),
+    "milestone_edit_deadline": (r'name="deadline"[^>]*value="([^"]*)"',),
+    "milestone_edit_description": (
+        r'<textarea[^>]*name="content"[^>]*>(.*?)</textarea>',
+    ),
+    # Column color: the form posts the value of a color input, and Forgejo
+    # answers anything it cannot parse with a bare HTTP 500 rather than a
+    # validation message, so the accepted shape is checked before sending.
+    # Six hex digits exactly -- the CSS three-digit shorthand (#fff) is *not*
+    # accepted and produces that same 500, which is why this is not the more
+    # permissive pattern it looks like it should be.
+    "column_color": (r"#[0-9a-fA-F]{6}",),
+    # The message Forgejo renders when it refuses a submitted form. The text
+    # sits in a <p> inside the flash container on every release from 1.20 to 16;
+    # Forgejo 13 added an hx-swap-oob attribute to the container, so attributes
+    # after the class list are skipped. The second candidate is a fallback for a
+    # template that ever drops the paragraph -- without it, an empty flash
+    # container would match and report a rejection with no reason.
+    "form_error": (
+        r'class="[^"]*flash-error[^"]*"[^>]*>\s*<p[^>]*>\s*([^<]+?)\s*</p>',
+        r'class="[^"]*flash-error[^"]*"[^>]*>\s*([^<]*?\S[^<]*?)\s*<',
+    ),
     # Issue page.
     "issue_id": (r'data-issue-id="(\d+)"',),
     "issue_number": (r'<span class="index">#(\d+)</span>',),
@@ -233,8 +262,26 @@ class Profile:
     csrf_mode: str = CSRF_ORIGIN
     routes: Mapping[str, str] = field(default_factory=lambda: _ROUTES)
     patterns: Mapping[str, tuple[str, ...]] = field(default_factory=lambda: _PATTERNS)
+    # The project form's card-type dropdown posts the value of the option the
+    # user picked: 0 for "Text only" and 1 for "Images and text". Forgejo
+    # silently stores anything outside that pair as 0, so the mapping is
+    # enforced client-side rather than discovered from a rejected write.
     card_types: Mapping[str, str] = field(
-        default_factory=lambda: {"text": "1", "images_and_text": "2"}
+        default_factory=lambda: {"text": "0", "images_and_text": "1"}
+    )
+    # Routes that answer a *successful* write with a redirect and a *refused*
+    # one with HTTP 200 and the re-rendered form. On those, and only those, a
+    # 200 is a rejection rather than a success -- see ForgejoClient._write.
+    #
+    # This is deliberately not every write route. The board mutations
+    # (column_new, column, column_default, column_move, issue_projects) answer
+    # a success with 200 and a JSON body, project/milestone close and open
+    # answer 200 from Forgejo 1.21 onward (1.20 redirects), and milestone_delete
+    # answers 200 whether or not the milestone existed. Live-probed on every
+    # release from 1.20 to 16: the four routes below redirect on success on all
+    # of them.
+    redirect_writes: frozenset[str] = frozenset(
+        {"project_new", "project_edit", "milestone_new", "milestone_edit"}
     )
     version: Version | None = None
     quirks: tuple[str, ...] = ()

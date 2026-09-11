@@ -12,12 +12,20 @@ import os
 import sys
 from collections.abc import Awaitable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field, ValidationError
 
 from .client import AuthError, ForgejoClient, ForgejoError
+
+# Every numeric argument is a Forgejo identifier, and pydantic's default lax
+# mode coerces "7", 7.0 and even true into one. That turned a malformed call
+# into a well-formed call against the wrong resource -- true reads issue 1 --
+# so identifiers are matched strictly. The published JSON schema is unchanged
+# ({"type": "integer"}), so MCP clients and the generated CLI see no difference.
+Id = Annotated[int, Field(strict=True)]
 
 # --- logging: stdio transport owns stdout, so all logs MUST go to stderr ------
 logger = logging.getLogger("forgejo_projects_mcp")
@@ -44,7 +52,35 @@ async def _lifespan(_server: MCPServer):
         await client.close()
 
 
-mcp = MCPServer("forgejo-projects-mcp", lifespan=_lifespan)
+class _ToolServer(MCPServer):
+    """An MCPServer that reports a bad argument with a code, like every other
+    failure.
+
+    Argument validation runs inside ``call_tool``, before the tool body and so
+    before ``_safe`` can classify anything, and a rejection arrived as a raw
+    pydantic dump ending in a docs URL -- the one failure in this surface with
+    no ``[CODE]`` to branch on. Both transports reach a tool through this
+    method (the MCP wire handler calls it, and the CLI dispatches through it),
+    so normalising here covers both.
+    """
+
+    async def call_tool(self, name, arguments, context=None):
+        try:
+            return await super().call_tool(name, arguments, context)
+        except ToolError as e:
+            cause = e.__cause__
+            # Only argument validation is rewritten; a ToolError raised by a
+            # tool already carries its own code from _safe.
+            if not isinstance(cause, ValidationError):
+                raise
+            detail = "; ".join(
+                f"{'.'.join(str(p) for p in d['loc'])}: {d['msg']}"
+                for d in cause.errors()
+            )
+            raise ToolError(f"[INVALID_INPUT] {name}: {detail}") from e
+
+
+mcp = _ToolServer("forgejo-projects-mcp", lifespan=_lifespan)
 
 
 def _classify(exc: Exception) -> dict[str, Any]:
@@ -142,7 +178,7 @@ async def authenticate(force: bool = False) -> dict:
 
 
 @mcp.tool()
-async def list_repositories(query: str = "", limit: int = 50, page: int = 1) -> dict:
+async def list_repositories(query: str = "", limit: Id = 50, page: Id = 1) -> dict:
     """List repositories the current user can access (for choosing where to manage projects).
 
     Args:
@@ -182,7 +218,8 @@ async def create_project(
     Args:
         owner: Repository owner.
         repo: Repository name.
-        title: Project title.
+        title: Project title. Must not be blank: Forgejo accepts an empty title
+            and creates a board its own list pages then omit.
         description: Optional description.
         card_type: 'text' or 'images_and_text'.
     """
@@ -190,7 +227,7 @@ async def create_project(
 
 
 @mcp.tool()
-async def get_project(owner: str, repo: str, project_id: int) -> dict:
+async def get_project(owner: str, repo: str, project_id: Id) -> dict:
     """Get a project board: its columns and the cards (issues) in each.
 
     Returns column ids/titles and, per card, the issue id, number and title.
@@ -200,30 +237,34 @@ async def get_project(owner: str, repo: str, project_id: int) -> dict:
 
 @mcp.tool()
 async def update_project(
-    owner: str, repo: str, project_id: int,
+    owner: str, repo: str, project_id: Id,
     title: str | None = None, description: str | None = None,
     card_type: str | None = None,
 ) -> dict:
-    """Update a project's title, description and/or card type."""
+    """Update a project's title, description and/or card type.
+
+    Fields left unset keep their current value; pass an empty string to clear
+    one deliberately.
+    """
     return await _safe(
         client.update_project(owner, repo, project_id, title, description, card_type)
     )
 
 
 @mcp.tool()
-async def close_project(owner: str, repo: str, project_id: int) -> dict:
+async def close_project(owner: str, repo: str, project_id: Id) -> dict:
     """Close (archive) a project."""
     return await _safe(client.close_project(owner, repo, project_id))
 
 
 @mcp.tool()
-async def reopen_project(owner: str, repo: str, project_id: int) -> dict:
+async def reopen_project(owner: str, repo: str, project_id: Id) -> dict:
     """Reopen a closed project."""
     return await _safe(client.reopen_project(owner, repo, project_id))
 
 
 @mcp.tool()
-async def delete_project(owner: str, repo: str, project_id: int) -> dict:
+async def delete_project(owner: str, repo: str, project_id: Id) -> dict:
     """Permanently delete a project. This does not delete its issues."""
     return await _safe(client.delete_project(owner, repo, project_id))
 
@@ -231,22 +272,29 @@ async def delete_project(owner: str, repo: str, project_id: int) -> dict:
 # --------------------------------------------------------------------- columns
 @mcp.tool()
 async def create_column(
-    owner: str, repo: str, project_id: int, title: str, color: str = ""
+    owner: str, repo: str, project_id: Id, title: str, color: str = ""
 ) -> dict:
     """Add a column to a project board.
 
     Args:
-        color: Optional hex color, e.g. '#e01e5a'.
+        title: Column title. Must not be blank: Forgejo accepts an empty title
+            and renders a column nothing can tell apart from another.
+        color: Optional hex color: six digits after a '#', e.g. '#e01e5a'. The
+            '#fff' shorthand is not accepted. Anything else is refused here;
+            Forgejo answers it with HTTP 500.
     """
     return await _safe(client.create_column(owner, repo, project_id, title, color))
 
 
 @mcp.tool()
 async def edit_column(
-    owner: str, repo: str, project_id: int, column_id: int,
+    owner: str, repo: str, project_id: Id, column_id: Id,
     title: str | None = None, color: str | None = None,
 ) -> dict:
-    """Edit a column's title and/or color."""
+    """Edit a column's title and/or color.
+
+    Only the fields given are sent. A blank title is refused.
+    """
     return await _safe(
         client.edit_column(owner, repo, project_id, column_id, title, color)
     )
@@ -254,7 +302,7 @@ async def edit_column(
 
 @mcp.tool()
 async def delete_column(
-    owner: str, repo: str, project_id: int, column_id: int
+    owner: str, repo: str, project_id: Id, column_id: Id
 ) -> dict:
     """Delete a column. Its cards return to the default/uncategorized column."""
     return await _safe(client.delete_column(owner, repo, project_id, column_id))
@@ -262,7 +310,7 @@ async def delete_column(
 
 @mcp.tool()
 async def set_default_column(
-    owner: str, repo: str, project_id: int, column_id: int
+    owner: str, repo: str, project_id: Id, column_id: Id
 ) -> dict:
     """Set a column as the project's default (where new cards land)."""
     return await _safe(client.set_default_column(owner, repo, project_id, column_id))
@@ -272,15 +320,19 @@ async def set_default_column(
 @mcp.tool()
 async def create_issue(
     owner: str, repo: str, title: str, body: str = "",
-    project_id: int | None = None, milestone_id: int | None = None,
-    label_ids: list[int] | None = None, assignee_ids: list[int] | None = None,
+    project_id: Id | None = None, milestone_id: Id | None = None,
+    label_ids: list[Id] | None = None, assignee_ids: list[Id] | None = None,
 ) -> dict:
     """Create an issue, optionally placing it directly on a project board.
 
     Args:
-        project_id: If given, the issue is added to that project as a card.
-        milestone_id: Optional milestone to attach.
-        label_ids / assignee_ids: Optional numeric ids.
+        project_id: If given, the issue is added to that project as a card. An
+            unknown id is reported as not-found and no issue is created.
+        milestone_id: Optional milestone to attach. An unknown id is reported as
+            not-found and no issue is created.
+        label_ids / assignee_ids: Optional numeric ids. An unknown assignee is an
+            error; an unknown label is silently ignored by Forgejo, which creates
+            the issue without it, so read the issue back if labels matter.
     """
     return await _safe(
         client.create_issue(
@@ -291,9 +343,19 @@ async def create_issue(
 
 @mcp.tool()
 async def add_issues_to_project(
-    owner: str, repo: str, project_id: int, issue_numbers: list[int]
+    owner: str, repo: str, project_id: Id, issue_numbers: list[Id]
 ) -> dict:
-    """Add existing issues (by their repo issue numbers) to a project as cards."""
+    """Move existing issues (by their repo issue numbers) onto a project board.
+
+    Named "add" because it creates a card, but an issue holds a single project
+    assignment: attaching one that already sits on another board REMOVES it from
+    that board. There is no way to keep an issue on two boards at once. Cards
+    land in the project's default column.
+
+    The board is read back before this reports success, so ``cards`` names the
+    column each issue actually landed in. An attachment Forgejo accepted but
+    that produced no card is ATTACH_UNVERIFIED rather than a reported success.
+    """
     return await _safe(
         client.add_issues_to_project(owner, repo, project_id, issue_numbers)
     )
@@ -301,26 +363,48 @@ async def add_issues_to_project(
 
 @mcp.tool()
 async def remove_issues_from_project(
-    owner: str, repo: str, issue_numbers: list[int]
+    owner: str, repo: str, issue_numbers: list[Id], project_id: Id | None = None
 ) -> dict:
-    """Remove issues (by number) from any project board. The issues themselves survive."""
+    """Detach issues (by number) from EVERY project board they are on.
+
+    Despite the name, this is not scoped to one project: Forgejo's route clears
+    an issue's project assignment outright, so an issue on two boards is removed
+    from both. There is no project-scoped alternative -- an issue only ever
+    holds one project assignment, so there is no such thing to offer.
+    The issues themselves survive.
+
+    The returned list describes the resulting state, not what changed: an issue
+    that was already on no board is listed as detached too.
+
+    Args:
+        project_id: Optional guard, not a scope. When given, every issue must
+            already be a card on that project or the call is refused with
+            CARD_NOT_FOUND and nothing is detached. Pass it whenever you know
+            which board the issues are on: it is the only way to be sure this
+            does not clear an assignment you did not mean to touch.
+    """
     return await _safe(
-        client.remove_issues_from_project(owner, repo, issue_numbers)
+        client.remove_issues_from_project(owner, repo, issue_numbers, project_id)
     )
 
 
 @mcp.tool()
 async def move_card(
-    owner: str, repo: str, project_id: int, column_id: int, issue_numbers: list[int]
+    owner: str, repo: str, project_id: Id, column_id: Id, issue_numbers: list[Id]
 ) -> dict:
-    """Move one or more cards (issues, by number) into a column, in the given order."""
+    """Move one or more cards (issues, by number) into a column, in the given order.
+
+    Every issue must already be a card on this project; one that is not is
+    reported as not-found rather than attempted. An issue number may appear
+    only once per call.
+    """
     return await _safe(
         client.move_card(owner, repo, project_id, column_id, issue_numbers)
     )
 
 
 @mcp.tool()
-async def delete_issue(owner: str, repo: str, number: int) -> dict:
+async def delete_issue(owner: str, repo: str, number: Id) -> dict:
     """Permanently delete an issue by number."""
     return await _safe(client.delete_issue(owner, repo, number))
 
@@ -335,20 +419,22 @@ def _summary(issue: dict) -> dict:
 
 @mcp.tool()
 async def bulk_move_cards(
-    owner: str, repo: str, project_id: int, moves: list[dict[str, int]]
+    owner: str, repo: str, project_id: Id, moves: list[dict[str, Id]]
 ) -> dict:
     """Move many cards at once, each to its own column.
 
     Args:
         moves: list of {"issue_number": N, "column_id": C}. Cards going to the
-            same column are placed in the order listed. Runs concurrently.
+            same column are placed in the order listed. Runs concurrently, so an
+            issue number may appear only once per call -- a card cannot be sent
+            to two columns in one batch.
     """
     return await _safe(client.bulk_move_cards(owner, repo, project_id, moves))
 
 
 @mcp.tool()
 async def bulk_read_issues(
-    owner: str, repo: str, issue_numbers: list[int], state: str = "all"
+    owner: str, repo: str, issue_numbers: list[Id], state: str = "all"
 ) -> dict:
     """Read a summary (number, title, state, milestone) of many issues at once.
 
@@ -372,7 +458,7 @@ async def bulk_read_issues(
 
 
 @mcp.tool()
-async def read_card(owner: str, repo: str, number: int) -> dict:
+async def read_card(owner: str, repo: str, number: Id) -> dict:
     """Full content of one card/issue: title, state, body, milestone, and all comments.
 
     ⚠️ Network- and token-expensive. Avoid unless asked or necessary.
@@ -382,9 +468,9 @@ async def read_card(owner: str, repo: str, number: int) -> dict:
 
 @mcp.tool()
 async def read_column(
-    owner: str, repo: str, project_id: int, column_id: int,
-    state: str = "all", milestone: int | None = None,
-    limit: int | None = None, offset: int = 0,
+    owner: str, repo: str, project_id: Id, column_id: Id,
+    state: str = "all", milestone: Id | None = None,
+    limit: Id | None = None, offset: Id = 0,
 ) -> dict:
     """Full content of every card in a column.
 
@@ -405,9 +491,9 @@ async def read_column(
 
 @mcp.tool()
 async def read_milestone(
-    owner: str, repo: str, milestone_id: int,
-    state: str = "all", project: int | None = None,
-    limit: int | None = None, offset: int = 0,
+    owner: str, repo: str, milestone_id: Id,
+    state: str = "all", project: Id | None = None,
+    limit: Id | None = None, offset: Id = 0,
 ) -> dict:
     """Full content of every issue attached to a milestone.
 
@@ -428,9 +514,9 @@ async def read_milestone(
 
 @mcp.tool()
 async def read_project(
-    owner: str, repo: str, project_id: int,
-    state: str = "all", milestone: int | None = None,
-    limit: int | None = None, offset: int = 0,
+    owner: str, repo: str, project_id: Id,
+    state: str = "all", milestone: Id | None = None,
+    limit: Id | None = None, offset: Id = 0,
 ) -> dict:
     """Full content of an entire board: every column and every card's content.
 
@@ -467,7 +553,8 @@ async def create_milestone(
     """Create a milestone.
 
     Args:
-        deadline: Optional due date, 'YYYY-MM-DD'.
+        deadline: Optional due date, 'YYYY-MM-DD'. A date Forgejo will not
+            accept is reported as an error, not as a created milestone.
     """
     return await _safe(
         client.create_milestone(owner, repo, title, description, deadline)
@@ -476,31 +563,38 @@ async def create_milestone(
 
 @mcp.tool()
 async def edit_milestone(
-    owner: str, repo: str, milestone_id: int,
+    owner: str, repo: str, milestone_id: Id,
     title: str | None = None, description: str | None = None,
     deadline: str | None = None,
 ) -> dict:
-    """Edit a milestone's title, description and/or deadline ('YYYY-MM-DD')."""
+    """Edit a milestone's title, description and/or deadline ('YYYY-MM-DD').
+
+    Fields left unset keep their current value; pass an empty string to clear
+    one deliberately.
+    """
     return await _safe(
         client.edit_milestone(owner, repo, milestone_id, title, description, deadline)
     )
 
 
 @mcp.tool()
-async def close_milestone(owner: str, repo: str, milestone_id: int) -> dict:
+async def close_milestone(owner: str, repo: str, milestone_id: Id) -> dict:
     """Close a milestone."""
     return await _safe(client.close_milestone(owner, repo, milestone_id))
 
 
 @mcp.tool()
-async def reopen_milestone(owner: str, repo: str, milestone_id: int) -> dict:
+async def reopen_milestone(owner: str, repo: str, milestone_id: Id) -> dict:
     """Reopen a closed milestone."""
     return await _safe(client.reopen_milestone(owner, repo, milestone_id))
 
 
 @mcp.tool()
-async def delete_milestone(owner: str, repo: str, milestone_id: int) -> dict:
-    """Delete a milestone."""
+async def delete_milestone(owner: str, repo: str, milestone_id: Id) -> dict:
+    """Delete a milestone.
+
+    A milestone that does not exist is an error rather than a reported success.
+    """
     return await _safe(client.delete_milestone(owner, repo, milestone_id))
 
 

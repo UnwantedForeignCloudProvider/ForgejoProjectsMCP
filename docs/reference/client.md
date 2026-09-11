@@ -163,6 +163,8 @@ async list_projects(owner: str, repo: str, state: str = "open") -> list[dict[str
 
 Returns `{id, title}` entries parsed from the repository projects page. `state` is validated against `open`, `closed`, and `all`. `all` makes separate open and closed requests and merges IDs.
 
+The page is paginated at 20 entries with no total published, so this walks pages through `_list_paged` until one comes back empty — the result is the complete list, at the cost of one request per 20 entries per state. `list_milestones` works the same way.
+
 #### `create_project`
 
 ```python
@@ -172,7 +174,9 @@ async create_project(
 ) -> dict[str, Any]
 ```
 
-Posts a project form, maps `text` to Forgejo card type `1` and `images_and_text` to `2` (through the profile's `card_types`), then reads the open project list to recover the new ID. Returns `{created: True, project: {id, title} | None}`.
+Posts a project form, maps `text` to Forgejo card type `0` and `images_and_text` to `1` (through the profile's `card_types`), then reads the open project list to recover the new ID. Returns `{created: True, project: {id, title}}`.
+
+Raises `INVALID_INPUT` for a blank title or an unknown `card_type` before sending anything — Forgejo accepts both and produces a board that is respectively unfindable or of the wrong type. Raises `CREATE_UNVERIFIED` when the write was accepted but no listed project matches the title; it never falls back to another project, because the returned ID is what a caller mutates next.
 
 #### `get_project`
 
@@ -208,7 +212,7 @@ async update_project(
 ) -> dict[str, Any]
 ```
 
-Reads the edit form to preserve an omitted title and card type. It sends `description` as an empty string when that argument is `None`, so callers should pass the desired description explicitly when updating only another field. Returns `{updated: True, project_id}`.
+Reads the edit form to preserve every argument left as `None` — title, description and card type alike — because the route replaces the whole project and clears anything the form omits. Pass an empty string to clear a field deliberately. A title that would end up blank raises `INVALID_INPUT`. Returns `{updated: True, project_id}`.
 
 #### `close_project`, `reopen_project`, `delete_project`
 
@@ -230,9 +234,9 @@ async delete_column(owner, repo, project_id, column_id) -> dict[str, Any]
 async set_default_column(owner, repo, project_id, column_id) -> dict[str, Any]
 ```
 
-- `create_column` posts the title/color and re-reads the board to recover the created column object.
-- `edit_column` uses **PUT** and sends only non-`None` fields.
-- `delete_column` uses **DELETE**. If the upstream rejects deletion, the raised error adds a hint that the default column must be changed first.
+- `create_column` posts the title/color and re-reads the board to recover the created column object. A blank title raises `INVALID_INPUT` — Forgejo would accept it and render a column nothing can tell apart — and a column that cannot be found afterwards raises `CREATE_UNVERIFIED` rather than returning `column: None` beside `created: True`.
+- `edit_column` uses **PUT** and sends only non-`None` fields. A blank title raises `INVALID_INPUT`.
+- `delete_column` uses **DELETE**. It reads the board first: Forgejo answers both an unknown id and the default column with HTTP 500, so an id that is not on the board raises `COLUMN_NOT_FOUND` (404), and only a column that exists gets the hint that the default must be changed first.
 - `set_default_column` posts the default action and returns `{default_column, project_id}`.
 
 ### Cards and issues
@@ -249,10 +253,16 @@ Fetches the issue page and extracts `data-issue-id`. A missing marker raises `Fo
 
 ```python
 async add_issues_to_project(owner, repo, project_id, issue_numbers: list[int]) -> dict[str, Any]
-async remove_issues_from_project(owner, repo, issue_numbers: list[int]) -> dict[str, Any]
+async remove_issues_from_project(
+    owner, repo, issue_numbers: list[int], project_id: int | None = None
+) -> dict[str, Any]
 ```
 
 Both resolve every repository issue number first, then post to `/issues/projects`. Attach uses the project ID; detach uses project ID `0`. Detaching leaves the issue intact.
+
+Attach then reads the board back and returns `cards`, naming the `column_id` and `column_title` each issue landed in. The route answers a write that changed nothing exactly like one that worked, so without the read-back `attached` meant only that Forgejo had not refused the form. An issue that is not a card afterwards raises `ForgejoError(code="ATTACH_UNVERIFIED")` with no status, classified like `CREATE_UNVERIFIED`.
+
+Detach's `project_id` is a guard, not a scope. Forgejo clears the assignment outright and an issue only ever holds one, so there is no scoped variant to offer; naming a project instead asserts which board the caller believes the issues are on and raises `CARD_NOT_FOUND` when they are not, before any write.
 
 #### `move_card`
 
@@ -267,7 +277,7 @@ Resolves issue IDs and posts JSON shaped like:
 {"issues": [{"issueID": 1042, "sorting": 0}, {"issueID": 1043, "sorting": 1}]}
 ```
 
-The return value includes the original issue numbers, target column ID, and the upstream JSON body when available.
+The return value includes the original issue numbers, target column ID, and the upstream JSON body when available. Unlike attach, this does not read the board back: the route reports success explicitly, and `_require_cards` has already read the board as a precondition.
 
 #### `create_issue` and `delete_issue`
 
@@ -308,7 +318,7 @@ async read_issue(owner, repo, number: int) -> dict[str, Any]
 async bulk_read_issues(owner, repo, numbers: list[int], state: str = "all") -> list[dict[str, Any]]
 ```
 
-`bulk_read_issues` runs issue reads concurrently with `asyncio.gather(..., return_exceptions=True)`, preserves input order, and represents an individual failure as `{"number": n, "error": "..."}`. `state` post-filters successful issue content.
+`bulk_read_issues` runs issue reads concurrently with `asyncio.gather(..., return_exceptions=True)`, preserves input order, and represents an individual failure as `{"number": n, "error": "..."}`. `state` post-filters successful issue content. A repeated issue number is collapsed to its first occurrence before the reads are issued, so a duplicate costs nothing and is reported once; unlike a batch of moves, a repeated read contradicts nothing, so it is deduplicated rather than refused.
 
 #### Filtered readers
 
@@ -330,6 +340,8 @@ async read_project_content(
 ```
 
 All validate state. They collect matching repository issue numbers, apply zero-based offset/limit, read full issue content, and report `total`, `returned`, `truncated`, and `error_count`. Project content preserves all board columns and groups selected issues beneath them. Missing columns and milestones raise `COLUMN_NOT_FOUND` and `MILESTONE_NOT_FOUND`.
+
+An optional `milestone` or `project` filter is confirmed to exist before it is used, through `_require_reference`, raising `MILESTONE_NOT_FOUND`/`PROJECT_NOT_FOUND`. Forgejo's issues list applies these as direct values and matches nothing for an id it does not know, which is indistinguishable from an empty result. The lookup is only performed when a filter is actually passed; a reader never re-confirms the project or milestone that is its own subject, since that has already been resolved.
 
 #### `bulk_move_cards`
 
@@ -354,13 +366,23 @@ async reopen_milestone(owner, repo, milestone_id) -> dict[str, Any]
 async delete_milestone(owner, repo, milestone_id) -> dict[str, Any]
 ```
 
-Milestone listing validates state and merges separate open/closed pages for `all`. Creation re-reads open milestones to recover the new ID. Editing currently sends empty strings for omitted fields. Deletion uses the collection route with `id=N`, matching the observed Forgejo behavior; it does not use `/milestones/{id}/delete`.
+Milestone listing validates state and merges separate open/closed pages for `all`. Creation re-reads open milestones to recover the new ID, raising `CREATE_UNVERIFIED` if none matches, and refuses a blank title with `INVALID_INPUT`; a deadline Forgejo will not parse comes back as `REJECTED` instead of a phantom success.
+
+`edit_milestone` reads the edit form through `_milestone_form` and merges: an argument left as `None` keeps its current value and an empty string clears it. The route replaces the whole milestone, and Forgejo refuses the submission outright when the title arrives empty — so sending only the changed field used to make a description- or deadline-only edit a silent no-op, and a title-only edit a silent wipe of the other two.
+
+Deletion uses the collection route with `id=N`, matching the observed Forgejo behavior; it does not use `/milestones/{id}/delete`. Because that route answers HTTP 200 whether or not anything was deleted, the milestone is resolved against the merged list first and a missing one raises `MILESTONE_NOT_FOUND`.
 
 ## Private helpers worth knowing
 
 The following methods are implementation details but explain operational behavior:
 
 - `_request` adds authentication, JSON/form encoding, CSRF headers, throttling, 429/503 retries, session-bounce re-authentication, one CSRF-rejection retry, and HTTP error conversion;
+- `_list_paged` walks a paginated list page (projects, milestones) and merges every page by id, stopping on an empty page or one that adds nothing new; it is why `list_projects`/`list_milestones` are complete rather than a first-page prefix, and why they can cost several requests;
+- `_diagnose_issue_create` turns the unnamed error Forgejo returns for an unusable `project_id`/`milestone_id` on `issues/new` into a specific not-found, by confirming which reference is missing — only after a failure, and only relabelling what a lookup proves absent;
+- `_require_column` reads the board before the column edit/delete/set-default routes, which all answer an unknown id with the same HTTP 500;
+- `_require_color` and `_require_unique_numbers` are the remaining input guards: a column color Forgejo would 500 on, and a move batch naming one issue twice;
+- `_write` wraps `_request` for form writes: on the routes named by `Profile.redirect_writes`, where Forgejo signals refusal by re-rendering the form as HTTP 200, a non-redirect is raised as `REJECTED` with Forgejo's own flash message instead of being reported as a completed write;
+- `_require_title`, `_card_type_value` and `_created` are the input and result guards behind the `INVALID_INPUT` and `CREATE_UNVERIFIED` codes;
 - `_absorb_page` learns the version and CSRF token from any rendered page, and swaps in the profile for a newly detected version;
 - `_route` renders an internal route through the active profile;
 - `_default_config_dir` computes the OS-independent cache root;

@@ -19,7 +19,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 
 from forgejo_projects_mcp import server
 
-from .helpers import unique
+from .helpers import unique, watch_requests
 
 
 @pytest.fixture
@@ -230,9 +230,26 @@ def test_a_missing_required_argument_is_rejected_before_dispatch(
     live_tools, seeded_repo, run_async
 ):
     """Schema validation runs first, so the instance is never troubled."""
-    with pytest.raises(Exception):
+    with pytest.raises(ToolError) as exc:
         call(live_tools, run_async, "move_card", owner=seeded_repo.owner,
              repo=seeded_repo.name, project_id=1, issue_numbers=[1])
+    assert "[INVALID_INPUT]" in str(exc.value)
+
+
+def test_a_stringified_issue_number_is_refused_without_touching_the_instance(
+    live_tools, live_client, seeded_repo, run_async
+):
+    """'2' used to be coerced and read whichever issue really had that number."""
+    log = watch_requests(live_client, run_async)
+    log.clear()
+
+    with pytest.raises(ToolError) as exc:
+        call(live_tools, run_async, "bulk_read_issues", owner=seeded_repo.owner,
+             repo=seeded_repo.name,
+             issue_numbers=[str(seeded_repo.issue_numbers[0])])
+
+    assert "[INVALID_INPUT]" in str(exc.value)
+    assert log.calls == []
 
 
 # ------------------------------------------------------------------- lifecycle

@@ -12,6 +12,12 @@ stay independent of each other and of run order.
 
 from __future__ import annotations
 
+import pytest
+
+from forgejo_projects_mcp.client import ForgejoError
+
+from .helpers import unique
+
 
 def test_project_lifecycle(live_client, seeded_repo, run_async, writable):
     """Create, list, read, rename, close, reopen and delete a board."""
@@ -77,6 +83,98 @@ def test_column_lifecycle(live_client, seeded_repo, live_project, run_async):
     assert spare_id not in [c["id"] for c in after["columns"]]
 
 
+def test_a_blank_column_title_is_refused_before_forgejo_sees_it(
+    live_client, seeded_repo, live_project, run_async
+):
+    """Forgejo accepts a whitespace title and renders an unnamed column.
+
+    Nothing in the board markup then distinguishes it from any other unnamed
+    column, so the client refuses to make one.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    project_id = live_project["id"]
+    # A board created on Forgejo 7 and newer starts with no columns at all, so
+    # the one this test renames has to be made first.
+    existing = int(
+        run_async(
+            live_client.create_column(owner, repo, project_id, "Named")
+        )["column"]["id"]
+    )
+    before = run_async(live_client.get_project(owner, repo, project_id))["columns"]
+
+    with pytest.raises(ForgejoError) as exc:
+        run_async(live_client.create_column(owner, repo, project_id, "   "))
+    assert exc.value.code == "INVALID_INPUT"
+
+    with pytest.raises(ForgejoError) as exc:
+        run_async(
+            live_client.edit_column(owner, repo, project_id, existing, title="")
+        )
+    assert exc.value.code == "INVALID_INPUT"
+
+    after = run_async(live_client.get_project(owner, repo, project_id))["columns"]
+    assert after == before
+
+
+@pytest.mark.parametrize(
+    ("operation", "arguments"),
+    [
+        ("delete_column", {}),
+        ("edit_column", {"title": "Renamed"}),
+        ("set_default_column", {}),
+    ],
+)
+def test_every_column_operation_says_so_for_an_unknown_id(
+    live_client, seeded_repo, live_project, run_async, operation, arguments
+):
+    """Forgejo answers all three with a bare HTTP 500 that explains nothing.
+
+    On delete it is also the very same 500 it uses for "that is the default
+    column", so reporting it verbatim sent the caller off to change a default
+    that had nothing to do with the failure.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+
+    with pytest.raises(ForgejoError) as exc:
+        run_async(
+            getattr(live_client, operation)(
+                owner, repo, live_project["id"], 999_999, **arguments)
+        )
+
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+    assert exc.value.status == 404
+    assert "default column" not in str(exc.value)
+
+
+def test_a_column_from_another_project_is_left_to_forgejo(
+    live_client, seeded_repo, live_project, run_async
+):
+    """Forgejo explains this case itself, with a usable HTTP 422.
+
+    The board guard only has to catch ids that exist nowhere; a real column
+    addressed through the wrong project already produces a precise message.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    other = run_async(live_client.create_project(owner, repo, unique("Other")))
+    other_id = int(other["project"]["id"])
+    try:
+        foreign = int(
+            run_async(
+                live_client.create_column(owner, repo, other_id, "Foreign")
+            )["column"]["id"]
+        )
+
+        with pytest.raises(ForgejoError) as exc:
+            run_async(
+                live_client.delete_column(owner, repo, live_project["id"], foreign)
+            )
+
+        # Not on this board, so the guard reports it before Forgejo is asked.
+        assert exc.value.code == "COLUMN_NOT_FOUND"
+    finally:
+        run_async(live_client.delete_project(owner, repo, other_id))
+
+
 def test_cards_move_between_columns(live_client, seeded_repo, live_project, run_async):
     """Attach seeded issues to a board and move them across columns."""
     owner, repo = seeded_repo.owner, seeded_repo.name
@@ -128,6 +226,73 @@ def test_cards_move_between_columns(live_client, seeded_repo, live_project, run_
     board = run_async(live_client.get_project(owner, repo, project_id))
     still_on_board = {c["number"] for col in board["columns"] for c in col["cards"]}
     assert not {first, second} & still_on_board
+
+
+def test_attaching_reports_the_column_the_card_really_landed_in(
+    live_client, seeded_repo, live_project, run_async
+):
+    """"Attached" used to mean only that Forgejo had not refused the form."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    project_id = live_project["id"]
+    number = seeded_repo.issue_numbers[0]
+
+    attached = run_async(
+        live_client.add_issues_to_project(owner, repo, project_id, [number])
+    )
+
+    assert attached["attached"] == [number]
+    placement = next(c for c in attached["cards"] if c["number"] == number)
+    # What the reply claims must be what the board actually shows.
+    board = run_async(live_client.get_project(owner, repo, project_id))
+    column = next(c for c in board["columns"] if c["id"] == placement["column_id"])
+    assert number in [card["number"] for card in column["cards"]]
+    assert column["title"] == placement["column_title"]
+
+    run_async(live_client.remove_issues_from_project(owner, repo, [number]))
+
+
+def test_a_guarded_detach_refuses_an_issue_that_is_on_another_board(
+    live_client, seeded_repo, live_project, run_async
+):
+    """Naming the wrong board used to clear the assignment anyway."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    on_board = live_project["id"]
+    number = seeded_repo.issue_numbers[0]
+    run_async(live_client.add_issues_to_project(owner, repo, on_board, [number]))
+
+    other = int(
+        run_async(live_client.create_project(owner, repo, unique("Elsewhere")))[
+            "project"
+        ]["id"]
+    )
+    try:
+        with pytest.raises(ForgejoError) as exc:
+            run_async(
+                live_client.remove_issues_from_project(
+                    owner, repo, [number], project_id=other
+                )
+            )
+        assert exc.value.code == "CARD_NOT_FOUND"
+
+        # Refused means nothing moved: the card is still where it was.
+        board = run_async(live_client.get_project(owner, repo, on_board))
+        assert number in [c["number"] for col in board["columns"] for c in col["cards"]]
+
+        # Pointed at the right board, the same call goes through.
+        run_async(
+            live_client.remove_issues_from_project(
+                owner, repo, [number], project_id=on_board
+            )
+        )
+        board = run_async(live_client.get_project(owner, repo, on_board))
+        assert number not in [
+            c["number"] for col in board["columns"] for c in col["cards"]
+        ]
+    finally:
+        try:
+            run_async(live_client.delete_project(owner, repo, other))
+        except Exception:  # cleanup is best-effort on a disposable instance
+            pass
 
 
 def test_issue_created_straight_onto_a_board(

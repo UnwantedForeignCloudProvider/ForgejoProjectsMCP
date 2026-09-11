@@ -46,8 +46,43 @@ def _bool(value: str) -> bool:
     return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
-def _add_argument(parser: argparse.ArgumentParser, name: str, spec: dict, required: bool) -> None:
+def _schema_type(spec: dict) -> str | None:
+    """The JSON-Schema type, seen through the ``anyOf`` an optional parameter uses.
+
+    An optional tool argument is published as ``{"anyOf": [{"type": "integer"},
+    {"type": "null"}]}`` with no type of its own. Reading only the top-level
+    ``type`` therefore attached no converter and handed the tool a string --
+    harmless while argument validation coerced it, and a rejected call once
+    identifiers are matched strictly.
+    """
     kind = spec.get("type")
+    if kind is not None:
+        return kind
+    for branch in spec.get("anyOf", ()):
+        branch_kind = branch.get("type")
+        if branch_kind not in (None, "null"):
+            return branch_kind
+    return None
+
+
+def _json_value(kind: str):
+    """A JSON argument parser that also enforces the shape the schema asks for."""
+    expected = list if kind == "array" else dict
+
+    def parse(value: str):
+        # JSONDecodeError is a ValueError, which argparse reports as a usage error.
+        parsed = json.loads(value)
+        if not isinstance(parsed, expected):
+            raise argparse.ArgumentTypeError(
+                f"expected a JSON {kind}, got {type(parsed).__name__}: {value}"
+            )
+        return parsed
+
+    return parse
+
+
+def _add_argument(parser: argparse.ArgumentParser, name: str, spec: dict, required: bool) -> None:
+    kind = _schema_type(spec)
     help_text = spec.get("description", "") or ""
     kwargs: dict[str, Any] = {"required": required, "help": help_text}
     if kind == "integer":
@@ -58,7 +93,7 @@ def _add_argument(parser: argparse.ArgumentParser, name: str, spec: dict, requir
         kwargs["type"] = _bool
         kwargs["metavar"] = "true|false"
     elif kind in ("array", "object"):
-        kwargs["type"] = json.loads
+        kwargs["type"] = _json_value(kind)
         kwargs["help"] = (help_text + " (JSON)").strip()
     if not required and "default" in spec:
         kwargs["default"] = spec["default"]

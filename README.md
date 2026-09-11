@@ -86,8 +86,8 @@ A `.env` file in the working directory is **loaded automatically** (via
 python-dotenv) — copy `.env.example` to `.env` and fill it in; no `source`/
 `export` needed. Real environment variables already set (and an MCP client's own
 `env` block) take precedence. See `.env.example` for the full list, including the
-optional `FORGEJO_MCP_MAX_CONCURRENCY`, `FORGEJO_MCP_RPS`, and
-`FORGEJO_MCP_LOG_LEVEL`.
+optional `FORGEJO_MCP_MAX_CONCURRENCY`, `FORGEJO_MCP_RPS`,
+`FORGEJO_MCP_TIMEOUT`, and `FORGEJO_MCP_LOG_LEVEL`.
 
 The session and the non-secret connection settings are cached under
 `<config>/forgejo_projects_mcp/`, so **after the first successful login no
@@ -265,9 +265,10 @@ The full readers take `limit`/`offset` to cap and page results, and return
 explicit. `bulk_read_issues` returns `count` (successful only) plus a separate
 `errors` list.
 
-⚠️ = network- and token-expensive; use only when needed. Concurrency and request
-rate are tunable via `FORGEJO_MCP_MAX_CONCURRENCY` (default 8) and
-`FORGEJO_MCP_RPS` (default 5).
+⚠️ = network- and token-expensive; use only when needed. Concurrency, request
+rate and the per-request timeout are tunable via `FORGEJO_MCP_MAX_CONCURRENCY`
+(default 8), `FORGEJO_MCP_RPS` (default 5) and `FORGEJO_MCP_TIMEOUT` (default 30
+seconds).
 
 **Milestones**
 - `list_milestones`, `create_milestone`, `edit_milestone`,

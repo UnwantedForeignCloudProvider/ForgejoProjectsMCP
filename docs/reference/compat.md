@@ -51,10 +51,28 @@ class Profile:
     csrf_mode: str                                # "origin" or "token"
     routes: Mapping[str, str]                     # operation -> path template
     patterns: Mapping[str, tuple[str, ...]]       # element -> ordered candidates
-    card_types: Mapping[str, str]                 # "text" -> "1", ...
+    card_types: Mapping[str, str]                 # "text" -> "0", ...
+    redirect_writes: frozenset[str]               # routes where 200 means refused
     version: Version | None
     quirks: tuple[str, ...]                       # ids of the applied quirks
 ```
+
+`card_types` maps the public names to the values the project form's dropdown
+posts: `text` to `"0"` and `images_and_text` to `"1"`. Forgejo stores any other
+value as `0` without complaining, so the client enforces the pair itself.
+
+The `column_color` pattern is a form-value contract too: Forgejo accepts exactly
+six hex digits after a `#` and answers anything else — including the CSS `#fff`
+shorthand — with a bare HTTP 500, so the client checks it before sending.
+
+`redirect_writes` names the routes that answer an accepted write with a redirect
+and a refused one with HTTP 200 and the re-rendered form — `project_new`,
+`project_edit`, `milestone_new` and `milestone_edit`. `ForgejoClient._write`
+treats a non-redirect from those as a rejection. Every other write route answers
+a success with 200, so adding one here would turn its successes into errors.
+Both are base-profile values: all twelve supported releases agree, so no quirk
+scopes them. See
+[the automation reference](../forgejo-projects-automation-reference.md#how-a-write-reports-success-and-how-it-reports-refusal).
 
 ### Routing
 

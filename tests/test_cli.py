@@ -1,4 +1,9 @@
-"""The argparse CLI mirrors the MCP tools and dispatches through them."""
+"""The argparse CLI mirrors the MCP tools and dispatches through them.
+
+These have live counterparts in ``tests/integration/test_live_cli.py``, except
+``test_a_json_object_is_refused_for_a_list_argument``, which argparse rejects
+before any dispatch: no instance is involved and none can be.
+"""
 
 import asyncio
 import io
@@ -57,6 +62,35 @@ def test_cli_parses_json_list_argument(monkeypatch, capsys):
     assert rc == 0
     assert seen["numbers"] == [1, 2, 3]      # parsed from JSON
     assert json.loads(capsys.readouterr().out)["count"] == 3
+
+
+def test_an_optional_integer_option_reaches_the_tool_as_an_integer(monkeypatch):
+    """--milestone arrived as a string and only worked while validation was lax.
+
+    An optional argument is published as ``anyOf: [integer, null]`` with no type
+    of its own, so the generated parser attached no converter.
+    """
+    seen = {}
+
+    async def fake(owner, repo, project_id, state="all", milestone=None,
+                   limit=None, offset=0):
+        seen.update(milestone=milestone, limit=limit, project_id=project_id)
+        return {"project_id": project_id, "columns": []}
+
+    monkeypatch.setattr(server.client, "read_project_content", fake)
+    rc = cli.main(["read_project", "--owner", "o", "--repo", "r",
+                   "--project_id", "1", "--milestone", "7", "--limit", "2"])
+    assert rc == 0
+    assert seen == {"milestone": 7, "limit": 2, "project_id": 1}
+
+
+def test_a_json_object_is_refused_for_a_list_argument(capsys):
+    """--issue_numbers '{"a":1}' used to pass a dict straight to the tool."""
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["bulk_read_issues", "--owner", "o", "--repo", "r",
+                  "--issue_numbers", '{"a": 1}'])
+    assert exc.value.code != 0
+    assert "JSON array" in capsys.readouterr().err
 
 
 def test_cli_returns_nonzero_on_error(monkeypatch, capsys):

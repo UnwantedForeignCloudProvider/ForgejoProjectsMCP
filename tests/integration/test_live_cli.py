@@ -81,6 +81,22 @@ def test_the_cli_parses_a_json_list_argument(run_cli, seeded_repo, capsys):
     assert [i["number"] for i in out["issues"]] == numbers
 
 
+def test_a_filtered_read_accepts_its_optional_integer_option(
+    run_cli, seeded_repo, live_project, capsys
+):
+    """An optional argument is published as anyOf, so it reached the tool as a string."""
+    rc, _ = run_cli([
+        "read_project", "--owner", seeded_repo.owner, "--repo", seeded_repo.name,
+        "--project_id", str(live_project["id"]),
+        "--milestone", str(seeded_repo.milestone_id),
+        "--limit", "1",
+    ])
+
+    out = printed(capsys)
+    assert rc == 0
+    assert out["filters"]["milestone"] == seeded_repo.milestone_id
+
+
 def test_the_cli_reports_a_real_failure_with_a_nonzero_exit(
     run_cli, seeded_repo, capsys
 ):

@@ -37,6 +37,7 @@ The tool intentionally uses a session login rather than a personal access token.
 |---|---:|---|
 | `FORGEJO_MCP_MAX_CONCURRENCY` | `8` | Maximum number of in-flight HTTP requests. The effective value is clamped to at least `1`. |
 | `FORGEJO_MCP_RPS` | `5` | Global steady-state request rate for this process. The effective value is clamped to at least `0.1` requests/second. |
+| `FORGEJO_MCP_TIMEOUT` | `30` | Seconds any single HTTP request may take before it is reported as `NETWORK_ERROR`. The effective value is clamped to at least `1`. Lower it when a caller would rather fail fast than wait on an instance that accepts connections but never answers. |
 | `FORGEJO_MCP_LOG_LEVEL` | `INFO` | Python logging level for server logs, written to stderr. Common values are `DEBUG`, `INFO`, `WARNING`, `ERROR`, and `CRITICAL`. |
 | `XDG_CONFIG_HOME` | `~/.config` | Base directory for the session cache. This follows the XDG convention when set; `Path.home()` is used otherwise. |
 
@@ -59,6 +60,8 @@ The precedence is:
 3. values loaded from `.env`.
 
 The dotenv loader does not override an existing variable. If you run the installed executable from another directory, either place `.env` in that directory or configure the variables in the shell/MCP client.
+
+Because the search walks *upward*, a command run anywhere inside a checkout that contains a `.env` inherits its values even when the surrounding shell defines none. This is worth knowing when diagnosing connection behavior: a `forgejo_status` that appears to hang without configured credentials is usually reaching the instance named by an inherited `.env`. Genuinely unconfigured, it returns `MISSING_CONFIG` immediately, without attempting a connection. To check what a clean environment would do, run from a directory outside any checkout.
 
 Quote values containing shell or dotenv special characters. For example:
 
@@ -128,6 +131,7 @@ Use lower values when sharing a small Forgejo instance or when a reverse proxy h
 ```dotenv
 FORGEJO_MCP_MAX_CONCURRENCY=2
 FORGEJO_MCP_RPS=1
+FORGEJO_MCP_TIMEOUT=30
 ```
 
 These settings reduce pressure; they do not make the underlying undocumented routes stable.

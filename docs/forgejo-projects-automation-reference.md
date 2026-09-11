@@ -5,7 +5,7 @@ query parameter, response shape, DOM anchor, and page-specific behavior on
 which `forgejo_projects_mcp` depends.
 
 The contracts below were audited against
-`src/forgejo_projects_mcp/client.py` on **2026-09-05** and live-verified against
+`src/forgejo_projects_mcp/client.py` on **2026-09-06** and live-verified against
 **every published Forgejo release from 1.20 through 16** by the integration
 suite (1.20, 1.21, then majors 7 to 16 — Forgejo's numbering skips 2 to 6). The original
 route discovery was performed against **Forgejo v15.0.7**. These routes are
@@ -142,14 +142,81 @@ HTTP 400 and above is an error. For JSON errors, the client reads the
 `message` member. For HTML errors, it exposes only the first concise `<p>`
 value, not the raw page.
 
-### Rate limiting
+### How a write reports success, and how it reports refusal
+
+**A status below 400 does not mean a write happened.** Forgejo's classic form
+routes answer an accepted submission with a redirect, and a *refused* one by
+re-rendering the form as HTTP 200 with a flash error. Both are below 400, so a
+status check alone reads a refusal as a success.
+
+The routes where a redirect is the success signal are listed in
+`Profile.redirect_writes`, and on those — and only those — the client treats a
+non-redirect as the rejection it is (`[REJECTED]`, HTTP 422), carrying the flash
+message where one is rendered:
+
+| Route | Success | Refusal |
+|---|---|---|
+| `POST /projects/new` | 303 to `/projects` | 200, re-rendered form |
+| `POST /projects/{project_id}/edit` | 303 to `/projects` | 200, re-rendered form |
+| `POST /milestones/new` | 303 to `/milestones` | 200, re-rendered form |
+| `POST /milestones/{milestone_id}/edit` | 303 to `/milestones` | 200, re-rendered form |
+
+Every other write route answers a *success* with 200, so the same rule must not
+be applied to them:
+
+| Route | Success | Notes |
+|---|---|---|
+| `POST /projects/{project_id}` (column create) | 200 `{"ok":true}` | JSON, not a redirect |
+| `PUT`/`DELETE /projects/{project_id}/{column_id}` | 200 | |
+| `POST /projects/{project_id}/{column_id}/default` | 200 | |
+| `POST /projects/{project_id}/{column_id}/move` | 200 `{"ok":true}` | |
+| `POST /issues/projects` | 200 | |
+| `POST /issues/new` | 200 JSON (1.20: 303) | see section 8 |
+| `POST /milestones/delete` | 200 `{"redirect": ...}` | **also 200 when nothing was deleted** |
+| project/milestone `close` and `open` | 200 (1.20: 303) | |
+| `POST /projects/{project_id}/delete` | 200 | 404 when already gone |
+
+The redirect `Location` on an accepted create names the *collection*
+(`/projects`, `/milestones`), never the new resource, so it cannot be used to
+recover the new id. Recovery is by title; see the sections below.
+
+The flash element carrying the refusal message is:
+
+```html
+<div class="ui negative message flash-message flash-error"><p>{message}</p></div>
+```
+
+Forgejo 13 added `hx-swap-oob="true"` to that element, and 16 renders an `id`
+alongside the class list (which release introduced the `id` was not measured).
+The `form_error` pattern therefore keys on the class token alone and tolerates
+other attributes on either side of it. The message text
+sits in a nested `<p>`; matching the container's own text would capture the
+whitespace between the tags and report a refusal with a blank reason. Some
+messages are untranslated i18n keys (`form.Title cannot be empty.`), and the
+quoting of the date message differs (`&#39;` on 1.20, `&#34;` from 7 on).
+
+Live-verified on every release from 1.20 to 16: the table above is identical on
+all of them, so this is a base-profile contract rather than a quirk.
+
+### Rate limiting and timeouts
 
 All requests share these client-side limits:
 
 - Concurrent requests: `FORGEJO_MCP_MAX_CONCURRENCY`, default `8`, minimum `1`.
 - Steady request rate: `FORGEJO_MCP_RPS`, default `5`, minimum `0.1`.
+- Per-request timeout: `FORGEJO_MCP_TIMEOUT`, in seconds, default `30`,
+  minimum `1`. It is applied to the request context, so it bounds every call.
 - HTTP 429 and 503 are retried up to two times. A numeric `Retry-After` value is
   honored; otherwise the delay is two seconds.
+
+The timeout is set explicitly rather than left to Playwright's own 30-second
+default, because an instance that accepts connections but never answers — a
+stalled proxy, or a `FORGEJO_URL` pointing somewhere unrelated — is otherwise
+indistinguishable from a hang for half a minute, with no way to shorten it. A
+caller that would rather fail fast can lower it. Note that a *missing*
+configuration never reaches this path at all: `FORGEJO_URL` is validated before
+any connection is attempted, so `forgejo_status` answers immediately with
+`authenticated: false` and `MISSING_CONFIG`.
 
 ## 4. Repository search endpoint
 
@@ -163,6 +230,19 @@ The response is expected to contain a `data` array. Each item may either be the
 repository object itself or wrap it in `repository`. The client reads
 `full_name`, `description`, `private`, `archived`, `empty`, and `fork`; owner
 and repository name are derived by splitting `full_name`.
+
+**Pagination boundaries are Forgejo's, and the client does not clamp them**
+(verified on 14, 15 and 16):
+
+- a `limit` of `0` or less yields Forgejo's own default page size, neither an
+  empty list nor an unbounded one;
+- `page=0` behaves as `page=1`; there is no page zero;
+- the endpoint publishes no total, so a short page is the only end-of-list
+  signal. This is unlike the projects and milestones list pages, which the
+  client walks to completion itself (see [§5a](#5a-list-pagination)).
+
+The values are passed through deliberately: clamping them would make the client
+assert a contract it does not own, and would mask an upstream change.
 
 ## 5. Project pages
 
@@ -188,6 +268,9 @@ For a logical `state=all`, the client performs two list requests (`open`, then
 `closed`) and merges the results by project ID. Invalid states are rejected
 before a request is sent.
 
+**These list pages are paginated — see [section 5a](#5a-list-pagination).** A
+single request returns at most 20 entries and says nothing about the rest.
+
 ### Project creation
 
 The create form sends:
@@ -197,35 +280,113 @@ redirect=
 title={title}
 content={description}
 template_type=
-card_type=1|2
+card_type=0|1
 ```
 
-`card_type=1` means text; `card_type=2` means images and text. Public tool values
-`text` and `images_and_text` are mapped to those numeric strings. The client
-always requests an empty template type.
+**`card_type=0` means text only; `card_type=1` means images and text.** The
+values are those of the edit form's dropdown options, which render as:
 
-Redirect following is disabled. The response does not supply an ID that the
-client consumes, so it lists open projects and selects the last project, in ID
-order, whose title exactly matches. If none matches, it falls back to the last
-open project; if the list is empty, the returned project is `null`. Duplicate
-titles or concurrent creation can therefore make ID recovery ambiguous.
+```html
+<input type="hidden" name="card_type" value="{stored}">
+<div class="menu">
+  <div class="item" data-id="0" data-value="0">Text only</div>
+  <div class="item" data-id="1" data-value="1">Images and text</div>
+</div>
+```
+
+Public tool values `text` and `images_and_text` map to `0` and `1`. Forgejo
+**accepts any value here and stores anything it does not recognise as `0`**,
+without an error — `2` and `bogus` both produce a text-only board — so the enum
+is enforced client-side (`[INVALID_INPUT]`) instead of being left to the server.
+Confirmed on 1.20 and 16 by creating a project per value and reading the stored
+value back off the edit form. The client always requests an empty template type.
+
+**Forgejo also accepts an empty project title**, answering 303 as it does for a
+valid one, and creates a board that the list page then omits: `_parse_projects_list`
+keeps only non-empty titles, and Forgejo itself renders the board's heading as
+`owner/repo`. The board stays reachable by id but cannot be found again through
+any list. The client refuses an empty or whitespace-only title before the
+request (`[INVALID_INPUT]`) rather than creating something unfindable.
+
+Redirect following is disabled. The redirect names `/projects`, not the new
+board, so the client lists open projects and selects the last project, in ID
+order, whose title exactly matches (compared against the stripped title, since
+the list page renders titles stripped). If none matches it raises
+`[CREATE_UNVERIFIED]`, saying the resource may exist and should be re-read.
+
+It must not fall back to another project: an earlier implementation returned the
+last open project when nothing matched, which meant a refused or hidden create
+handed back a **live, unrelated board id** that a follow-up mutation would then
+target. Duplicate titles or concurrent creation still make ID recovery ambiguous
+in the sense that the newest match wins.
 
 ### Project update
 
-Before updating, the client reads the edit page and extracts:
+The edit route is a **full replacement**: any field missing from the form is
+cleared, not kept. Before updating, the client therefore reads the edit page and
+extracts every field it is about to send:
 
-- Current title from `name="title" ... value="..."`.
-- Current card type from `name="card_type" ... value="..."`.
+| Field | HTML contract |
+|---|---|
+| Title | `<input name="title" ... value="{title}">` |
+| Card type | `<input type="hidden" name="card_type" value="{0\|1}">` |
+| Description | `<textarea name="content" ...>{description}</textarea>` |
 
-An omitted title and card type are preserved. The implementation does not read
-the existing description: when `description` is omitted it still sends
-`content=` and clears the description. This is current client behavior and an
-important destructive edge case.
+An argument left unset is carried over from that read; passing an empty string
+clears the field deliberately. An update that would leave the title blank is
+refused for the same reason a blank create is (`[INVALID_INPUT]`) — Forgejo
+accepts it and the board then disappears from the list pages.
+
+Values recovered this way are **HTML-escaped**, because they come out of an
+attribute or a textarea, and must be unescaped before being posted back. Posting
+them as parsed would escape them once more on every partial edit, so a title
+containing `&` would decay into `&amp;`, `&amp;amp;`, and so on.
+
+The description textarea is matched by its `name` rather than by attribute
+order, because Forgejo 10 replaced the plain textarea with the Markdown editor
+and `name="content"` moved behind `class`/`aria-label` attributes.
 
 Project close, reopen, and delete disable redirect following. Project deletion
 must use POST; DELETE returned HTTP 500 during the v15.0.7 live investigation.
 The reopen route is implemented and offline-tested but was not live-verified in
 the original investigation.
+
+## 5a. List pagination
+
+`/{owner}/{repo}/projects` and `/{owner}/{repo}/milestones` both render **20
+entries per page** and publish **no total, no page count, and no "next" marker
+the client parses**. A request without a `page` parameter returns the first page
+only, so reading one page silently returns a *prefix* of the list.
+
+| Property | Behavior |
+|---|---|
+| Page size | 20, on both pages |
+| Parameter | `?page=N`, combined with `state` |
+| Page past the end | HTTP 200 with **zero** entries — not a clamp to the last page |
+| Ordering, projects | Newest first, so the *oldest* fall off page 1 |
+| Ordering, milestones | Oldest first, so the *newest* fall off page 1 |
+
+The client therefore walks pages until one comes back empty or stops adding new
+ids, and merges by id. Both stop conditions are load-bearing: the empty page is
+the normal terminator, and the no-new-ids check is what would stop a server that
+answered an out-of-range page by clamping to the last one instead.
+
+The opposite orderings matter more than they look. Because milestones put the
+newest on the last page, a milestone created once 20 already existed was not on
+page 1 — and since creates verify themselves by title against this list
+(sections 5 and 11), a successful creation came back as `[CREATE_UNVERIFIED]`.
+Projects order the other way, so the same bug never showed there. Anything that
+resolves a resource through these lists inherits this behavior.
+
+Live-verified on **1.20, 1.21, 9, 13, 15 and 16**: identical page size, `page`
+parameter, out-of-range response and orderings on all six, so this is base-
+profile behavior with no quirk. The page walk is capped at
+`_MAX_LIST_PAGES` (50, i.e. 1000 entries) purely as a runaway guard; reaching it
+is logged as a warning rather than passed off as a complete list.
+
+Forgejo's REST API (`/api/v1/repos/{owner}/{repo}/milestones`) is a usable
+independent check for milestones and is what the integration suite compares
+against; projects have no such API, which is why this client exists.
 
 ## 6. Project board HTML contract
 
@@ -293,15 +454,58 @@ current parser. Do not depend on the previously documented
 | Reorder columns | POST | `/{owner}/{repo}/projects/{project_id}/move` | Inferred JSON `{columns:[{columnID, sorting}]}`; not implemented |
 
 Colors are optional hex strings such as `#e01e5a`. Column edit must use PUT;
-POST returned HTTP 405 during live verification.
+POST returned HTTP 405 during live verification. Both routes answer a success
+with HTTP 200, so the redirect rule in section 3 does not apply to them.
+
+**Column edit is a genuine partial update**, unlike the project and milestone
+edit forms: a PUT carrying only `color` leaves the title untouched. Verified on
+1.20 and 16. The client therefore sends only the fields it was given, and needs
+no read-modify-write here.
+
+**Forgejo accepts an empty or whitespace-only column title** on create and on
+edit, producing a column that nothing in the board markup distinguishes from any
+other unnamed one. The client refuses a blank title before the request
+(`[INVALID_INPUT]`).
+
+**A color Forgejo cannot parse is answered with a bare HTTP 500**, on create and
+on edit alike. The accepted shape is **exactly six hex digits** after a `#`:
+the CSS three-digit shorthand `#fff` reads like a valid color but produces that
+same 500, verified live. The client checks the value against the profile's
+`column_color` pattern before sending, so a typo is an `[INVALID_INPUT]` naming
+the field rather than an upstream server error. Colors are not rendered back by
+any reader the client parses, so a stored color cannot be verified through this
+client — which is why `column_color` is asserted against a real instance rather
+than against a fixture.
 
 After creation, the client reads the board and returns the last column whose
-title exactly matches. If no title matches, the returned column is `null`.
+title exactly matches. If no title matches it raises `[CREATE_UNVERIFIED]`
+rather than returning `column: null` next to `created: true`, which read as a
+success and was not one.
 
-The default column cannot be deleted. The client adds guidance to select
-another default column when Forgejo rejects such a deletion. Historically, a
-new project exposed an implicit “Uncategorized” destination as its default;
-that observation is not a selector contract used by the current parser.
+**Every column route that takes a column id answers an unknown one with a bare
+HTTP 500**, except the move route. The default column also cannot be deleted,
+and that failure is the *same* HTTP 500, so on delete the two were
+indistinguishable:
+
+| Route | Unknown column id | Column from another project |
+|---|---|---|
+| `PUT /projects/{project_id}/{column_id}` | 500 | 422 `ProjectColumn[N] is not in Project[M] as expected` |
+| `DELETE /projects/{project_id}/{column_id}` | 500 | 422, same message |
+| `POST /projects/{project_id}/{column_id}/default` | 500 | 422, same message |
+| `POST /projects/{project_id}/{column_id}/move` | **404** | — |
+
+The client therefore reads the board before edit, delete and set-default: an id
+that is not on it is `[COLUMN_NOT_FOUND]` (404), and only a column that really
+exists reaches Forgejo — so the "set another column as default first" guidance
+is now attached solely to a genuine default-column refusal. The cross-project
+case is left to Forgejo, which already explains it precisely; note that its
+message names the internal `ProjectBoard` on Forgejo 1.20 and `ProjectColumn`
+from 1.21 on, tracking the same rename as the board markup. Verified on 1.20 and
+16.
+
+Historically, a new project exposed an implicit “Uncategorized” destination as
+its default; that observation is not a selector contract used by the current
+parser.
 
 Column reordering and its payload were inferred from the UI but are not used or
 covered by the client tests. Card movement is implemented separately.
@@ -334,11 +538,78 @@ JSON request explicitly uses `Content-Type: application/json`. The move route
 historically returned `{"ok":true}`; the client returns parsed JSON when
 possible and otherwise returns the HTTP status.
 
+**The attach route reports nothing a caller can check.** It answers a write that
+changed nothing exactly as it answers one that worked: an ordinary redirect, no
+body, no indication of which column the card was placed in (verified on 14, 15
+and 16). This is the one board mutation with no success signal of its own — the
+move route returns `{"ok":true}` — so the client reads the board back after
+attaching and confirms each issue is a card, reporting `[ATTACH_UNVERIFIED]`
+when it is not. Detach is not read back: `id=0` is idempotent and clearing an
+assignment that was already clear is not a failure.
+
+**Detaching takes no project argument, and there is no scoped alternative.** An
+issue holds exactly one project assignment, so "remove from A while staying on
+B" is not a state Forgejo can represent. The client's optional `project_id` is
+therefore a client-side guard, not a scope: it refuses the call when an issue is
+not a card on the named board. The route itself is unchanged.
+
+**Moving an issue that is not a card on the project answers HTTP 500**, the same
+shape as an unknown column id would (verified on 15 and 16). The client reads
+the board first and reports `[CARD_NOT_FOUND]` (404) naming the issue numbers
+that are not on it, so "not attached here" is distinguishable from a server
+fault. `bulk_move_cards` applies the same check once for the whole batch.
+
+**Re-attaching an issue that is already on the project does not move its card.**
+The card keeps its column and position; only a *different* project's id
+reparents it (above). Verified on 15 and 16 across four sequences — default
+column set before and after attaching, an Uncategorized column present, and the
+issue batched with a second one — because a route that reset placement on retry
+would make every attach unsafe to repeat, and a QA report claimed it did.
+
 Attaching an issue places it in the project's default column. Detaching is the
 equivalent of deleting a card and does not delete the issue itself.
 
+**Detaching reports the issues it was asked about, not the ones it changed.**
+`id=0` clears the assignment unconditionally, and Forgejo answers the same way
+whether or not the issue was on a board, so an issue that was already detached
+comes back in the `detached` list too. The list is therefore the *resulting
+state* -- every number in it is now on no board -- rather than a record of work
+performed. Telling the two apart would mean reading each issue's page before
+writing, and the route offers nothing cheaper; callers that need that
+distinction must read first.
+
+**A card created by `issues/new` with a `project_id` materialises the default
+column.** On Forgejo 7 and newer a fresh board has no columns at all, and the
+first card added this way causes an `Uncategorized` column to appear and holds
+the card. Verified on 15 and 16. The create response carries only the issue
+number and title, so the resulting column is one board read away, not part of
+the answer.
+
+**An issue holds one project assignment, so attaching is really moving.**
+Posting a second project's `id` for an issue that is already on a board removes
+it from the first board; the route offers no way to keep an issue on two boards
+at once. Verified on 15 and 16 by attaching one issue to project A, then to
+project B, and reading both boards: A loses the card, B gains it. The client
+cannot make this additive — it is how the route stores the relationship — so
+`add_issues_to_project` documents the move, and the same single assignment is
+what makes detaching global (below).
+
+Detaching with `id=0` clears the issue's project assignment **globally**: an
+issue attached to two boards is removed from both by one call. The route takes
+no project argument, so there is no project-scoped removal to expose. This is
+worth stating plainly wherever the operation is described, because the tool
+name (`remove_issues_from_project`) reads as though it were scoped to one.
+
 Bulk movement groups requested cards by destination column and sends one move
 request per column. Ordering is relative to each destination group.
+
+Because those per-column requests run concurrently, a batch naming the same
+issue twice with different destinations used to send both — the card landed
+wherever the later write completed, while the reply listed it under both
+columns. Nothing in the route can express that intent, so the client refuses a
+batch containing a repeated issue number (`[INVALID_INPUT]`) instead of
+reporting a state that never existed. `move_card` applies the same rule to its
+own `issue_numbers` list.
 
 ### Create and delete issues
 
@@ -350,6 +621,33 @@ request per column. Ordering is relative to each destination group.
 `label_ids` and `assignee_ids` are comma-separated numeric IDs and are omitted
 when their lists are empty. Project and milestone fields are omitted when they
 are `null`.
+
+**Forgejo validates these sidebar references only as it applies them, and
+reports a failure without naming the field** — and not even with a consistent
+status. Measured on 1.20 and 16:
+
+| Reference | 1.20 | 16 | Issue created? |
+|---|---|---|---|
+| Unknown `milestone_id` | 500 | 500 | No |
+| `milestone_id` from another repository | 500 | 500 | No |
+| Unknown `project_id` | **500** | **404** | No |
+| Unknown `assignee_ids` | 500 | 500 | No |
+| Unknown `label_ids` | 200, **silently ignored** | 200, **silently ignored** | Yes |
+
+The client turns the ambiguous cases into a stable answer: on any error from
+this route it looks up whichever of `project_id`/`milestone_id` was supplied and,
+if one is genuinely absent, reports `[PROJECT_NOT_FOUND]` or
+`[MILESTONE_NOT_FOUND]` (404) — so the same input produces the same code on
+every release, despite 1.20 and 16 disagreeing on the status. The lookup is what
+authorises the relabelling, so a 404 from an unknown *repository* keeps its own
+meaning. When every supplied reference checks out, the upstream error is kept
+and a note names the fields worth re-reading (an unusable assignee cannot be
+looked up through any route the client uses). None of this costs anything on a
+successful create: the diagnosis runs only after a failure.
+
+An unknown label id is the one case with no error at all — the issue is created
+and the label is silently dropped. The client cannot detect this, because it has
+no labels route; a caller that needs labels applied must read the issue back.
 
 The new issue's number arrives in one of **two shapes, depending on the
 release**:
@@ -388,6 +686,15 @@ deduplicated, numerically sorted, and then read individually. This parser does
 not distinguish issue links in the main result list from unrelated matching
 links elsewhere on the page.
 
+**An unknown `project` or `milestone` id matches nothing rather than erroring.**
+Forgejo applies both as direct values and renders an ordinary empty issue list
+for an id that does not exist, which is indistinguishable from a filter that
+genuinely has no matching issues (verified on 14, 15 and 16). The client
+therefore confirms a caller-supplied filter id against the project or milestone
+list before querying, and reports `[PROJECT_NOT_FOUND]`/`[MILESTONE_NOT_FOUND]`.
+The confirmation is skipped when no filter is passed, and for the project or
+milestone that is the reader's own subject, which has already been resolved.
+
 ### Issue detail DOM contract
 
 The parser for `GET /{owner}/{repo}/issues/{issue_number}` depends on:
@@ -423,24 +730,42 @@ a second repository specifically to force them to diverge.
 These are not additional Forgejo endpoints; they explain how the pages above
 are combined.
 
+The board reader and the composed readers return deliberately different card
+shapes, and neither is a subset of the other: `get_project` gives card identity
+(`issue_id`, `number`, `title`) straight from the board markup, while
+`read_project` gives issue *content* (`number`, `title`, `state`, `body`,
+`milestone`, `comments`) fetched from each issue page. Only `number` is a
+mutation input, and both carry it; `issue_id` is internal and must not be passed
+to a card operation (section 2).
+
 - **Read card:** fetch and parse one issue detail page.
-- **Bulk read issues:** fetch issue pages concurrently. Individual failures are
+- **Bulk read issues:** collapse repeated issue numbers to their first
+  occurrence, then fetch issue pages concurrently. Individual failures are
   returned inline instead of aborting the batch. `open`/`closed` filtering is
   applied after parsing; failures remain visible regardless of that filter.
-- **Read column:** fetch the board, select the requested column, optionally use
+- **Read column:** fetch the board, select the requested column, confirm a
+  caller-supplied milestone filter against the milestone list, optionally use
   the filtered issues list for state/milestone filtering, then fetch each
   selected issue page.
 - **Read project:** fetch the board, flatten cards in board/column order,
+  confirm a caller-supplied milestone filter against the milestone list,
   optionally filter through the issues list, paginate, fetch issue pages, and
   reconstruct the column structure.
 - **Read milestone:** merge open and closed milestone lists to verify the ID,
-  query the issues list with the milestone and optional project filter, then
-  fetch the selected issue pages.
+  confirm a caller-supplied project filter against the project list, query the
+  issues list with the milestone and optional project filter, then fetch the
+  selected issue pages.
+- **Attach issues:** resolve each issue number to its global ID, post the attach
+  form, then read the board back and confirm each issue is a card, reporting the
+  column it landed in.
 
 `limit` and `offset` are local pagination applied after IDs have been scraped;
 they are not sent to Forgejo. For an unfiltered project or column read
-(`state=all` and no milestone), the issues list request is skipped. A missing
-column or milestone produces a local HTTP-404-classified error.
+(`state=all` and no milestone), the issues list request is skipped, and so is
+the filter confirmation. A missing column or milestone, and a filter naming a
+project or milestone that does not exist, produce a local HTTP-404-classified
+error. A reader never re-confirms the project or milestone that is its own
+subject: reading the board or resolving the milestone has already proved it.
 
 ## 11. Milestone pages
 
@@ -461,17 +786,45 @@ keeps the longest non-empty direct text found for each ID, and sorts by ID.
 
 For logical `state=all`, open and closed pages are fetched separately and
 merged. The page silently showed open milestones for `state=all` during the
-v15.0.7 investigation.
+v15.0.7 investigation. **This page is paginated at 20 entries with the newest
+last — see [section 5a](#5a-list-pagination); it is the list whose truncation
+broke milestone creation.**
 
 After creation, the client lists open milestones and returns the last exact
-title match, or `null` if there is no match. Duplicate titles or concurrent
-creation can make recovery ambiguous. `deadline` is sent as an optional
-`YYYY-MM-DD` string; an empty string means no deadline.
+title match, or raises `[CREATE_UNVERIFIED]` if there is no match. Duplicate
+titles or concurrent creation can make recovery ambiguous. `deadline` is sent as
+an optional `YYYY-MM-DD` string; an empty string means no deadline.
 
-Milestone edit always sends all three fields. Every omitted argument becomes
-an empty string, so a nominally partial edit clears every unspecified title,
-description, or deadline. This is current client behavior and a destructive
-edge case.
+Unlike projects and columns, **Forgejo refuses a blank milestone title itself**
+— and refuses an impossible date such as `2026-02-30` — by re-rendering the form
+as HTTP 200 (section 3). The client rejects a blank title before the request all
+the same, so the three resources behave alike, and reads the refusal for
+everything else.
+
+### Milestone edit
+
+The edit route is a **full replacement**, exactly like the project one, and
+Forgejo refuses the whole submission when the title arrives empty. Sending only
+the field being changed therefore did the worst possible thing: a
+description-only or deadline-only edit submitted a blank title and was refused
+outright, while a title-only edit succeeded and silently cleared the description
+and the deadline.
+
+The client now reads the edit form first and merges, so an argument left unset
+is preserved and an empty string clears the field deliberately:
+
+| Field | HTML contract |
+|---|---|
+| Title | `<input name="title" ... value="{title}">` |
+| Deadline | `<input type="date" id="deadline" name="deadline" value="{YYYY-MM-DD}">` |
+| Description | `<textarea ... name="content" ...>{description}</textarea>` |
+
+As on the project edit page, the textarea is matched by `name` rather than
+attribute order: Forgejo 10 moved the milestone description into the Markdown
+editor, which renders `class` and `aria-label` before `name`.
+
+There is no Forgejo defect behind the deadline: with a title in the form, the
+new deadline persists on every release from 1.20 to 16.
 
 The collection delete route is essential:
 
@@ -484,6 +837,14 @@ Do not use `POST /milestones/{milestone_id}/delete`; it was observed returning
 HTTP 200 without deleting the milestone. Close and reopen use the item routes
 but still include `id` in the form. Reopen is implemented and offline-tested,
 but was not live-verified in the original investigation.
+
+**The collection delete route answers HTTP 200 with `{"redirect": ...}` whether
+or not the milestone existed**, so a delete of something already gone is
+indistinguishable from a real one and cannot be detected after the fact. The
+client resolves the milestone against the merged open/closed list first and
+raises `[MILESTONE_NOT_FOUND]` (404) when it is absent, so `deleted: true` means
+a milestone was actually removed. This is the one delete in the client that
+cannot be made idempotent-and-honest by reading the response.
 
 ## 12. Observed routes outside current client coverage
 
@@ -543,19 +904,100 @@ Every route, form and DOM anchor in this document behaves identically on majors
 
 Each is asserted by the suite, which runs every test once per requested version.
 
+### Write-integrity behavior: uniform, so not a quirk
+
+The success/refusal signalling in section 3, the acceptance of blank project and
+column titles, the `card_type` values and their silent normalisation, and the
+unconditional HTTP 200 from `milestones/delete` were probed directly on **every
+supported release — 1.20, 1.21, and majors 7 through 16**. All twelve behave
+identically, so none of it is version-scoped: the contracts live in the base
+profile (`Profile.redirect_writes`, `Profile.card_types`, the `form_error` and
+edit-form patterns) with no `Quirk` attached.
+
+The probe did surface three version differences, none of which affects the
+client, and all of which are the reason `redirect_writes` names four routes
+rather than "every write":
+
+| Difference | Versions | Why it does not matter |
+|---|---|---|
+| project/milestone `close` and `open` answer 303, not 200 | 1.20 only | Not in `redirect_writes`; the client checks neither |
+| `issues/new` refuses a blank title with 200, not 400 | 1.20 only | The client does not create issues with blank titles |
+| Attaching to an unknown project answers 404, not 500 | 16 (older: 500) | Both are errors and surface as such |
+
+`test_the_redirect_writes_really_do_redirect_on_this_version` and
+`test_a_refused_form_is_recognised_on_this_version` in
+`tests/integration/test_live_compat.py` assert both halves of the section 3
+contract per version, so a release that switches one of those four routes to
+200-on-success fails the suite instead of silently turning every write on it
+into a reported rejection.
+
+### Column error shapes: uniform on the releases probed
+
+The per-route error table in section 7 was probed on **1.20 and 16** — the two
+ends of the supported range — by addressing each column route with an id that
+exists nowhere and with one belonging to a different project. Both releases
+answer identically, apart from the internal type name inside Forgejo's
+cross-project message (`ProjectBoard` on 1.20, `ProjectColumn` from 1.21),
+which the client does not parse. No quirk is involved:
+`test_every_column_operation_says_so_for_an_unknown_id` runs against every
+requested version, so a release that starts distinguishing these cases itself
+will show up as a failure rather than as a silently redundant board read.
+
+### What is *not* a Forgejo contract
+
+These behaviors look like instance behavior but are the client's own, and are
+recorded here so they are not re-diagnosed as Forgejo defects:
+
+- **A refused filter is not an empty board.** Forgejo answers an unknown
+  `project=`/`milestone=` filter with an ordinary empty issue list; the
+  `[PROJECT_NOT_FOUND]`/`[MILESTONE_NOT_FOUND]` raised for one is the client
+  confirming the id first (section 9).
+- **A guarded detach is not a scoped route.** `remove_issues_from_project`'s
+  optional `project_id` is checked client-side; the route it posts is the same
+  unscoped one either way (section 8).
+- **A strictly rejected identifier is not a Forgejo validation error.**
+  `[INVALID_INPUT]` for `"7"` where `7` was meant is argument validation in this
+  client, before any request is sent. Forgejo never sees the call.
+
+- **A stalled request is not a hang.** Every request is bounded by
+  `FORGEJO_MCP_TIMEOUT` (section 3). Before that bound was set explicitly the
+  limit was Playwright's own 30-second default, which made an unreachable-but-
+  connectable instance look like an indefinite hang.
+- **A missing configuration is not a connection failure.** `FORGEJO_URL` is
+  validated before any connection is attempted, so `forgejo_status` answers in
+  well under a second with `MISSING_CONFIG`. A `forgejo_status` that *does* take
+  30 seconds is reaching a configured instance that does not answer — note that
+  the package loads a `.env` searched from the working directory upward, so a
+  command run inside a checkout inherits that file's credentials even when the
+  surrounding shell defines none. See
+  [Configuration](configuration.md#env-loading-and-precedence).
+
 ### Current offline verification
 
 The tests assert the implemented request methods, paths, form/JSON payloads,
-HTML parsing behavior, list-state merging, composed reads, and the corrected
-milestone delete route. On the 2026-09-04 audit:
+HTML parsing behavior, list-state merging, composed reads, the corrected
+milestone delete route, and the write-integrity rules: that a refused form is
+reported as `[REJECTED]` rather than a success, that blank titles and unknown
+card types are refused before a request is sent, that a partial project or
+milestone edit preserves the fields it was not given, and that a create which
+cannot be matched back raises instead of returning an unrelated resource, and
+that every column operation rejects an unknown id without issuing the request,
+that an attachment which produced no card is `[ATTACH_UNVERIFIED]` rather than a
+reported success, that an unusable reader filter is named instead of returning
+an empty result, that a repeated issue number is read once, and that a
+stringified or fractional identifier is refused rather than coerced.
+On the 2026-09-06 audit:
 
 ```text
-uv run pytest -q
-...................................................................      [100%]
+uv run pytest
+184 passed, 134 skipped
 
 uv run mkdocs build --strict
 Documentation built successfully
 ```
+
+The skips are the integration tests, which stay inert until a
+`--forgejo-version` is requested; see below.
 
 In a sandbox where the normal user cache is read-only, `uv` can fail before
 running tests with `Could not acquire lock`. Pointing its cache at a writable

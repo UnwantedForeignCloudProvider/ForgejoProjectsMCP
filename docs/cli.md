@@ -46,7 +46,9 @@ forgejo-projects-cli <tool> --help   # options for one tool
 ```
 
 Options mirror each tool's parameters as `--flag`. List/object parameters take a
-**JSON string**.
+**JSON string**, and the value must be of the shape the tool asks for: an object
+passed where an array belongs is refused as a usage error rather than handed on.
+Numeric options are converted before dispatch, including the optional ones.
 
 ## Examples
 
@@ -85,6 +87,10 @@ forgejo-projects-cli read_project --owner o --repo r --project_id 3 \
 
 ## Errors and exit codes
 
-A failed call prints `{"error": "[CODE] message"}` and exits non-zero. Parse the
+A failed call prints `{"error": "[CODE] message"}` and exits `1`. Parse the
 JSON on stdout; ignore stderr for parsing (it carries logs). Set
 `FORGEJO_MCP_LOG_LEVEL=DEBUG` for verbose diagnostics.
+
+An argument rejected before dispatch — unparseable JSON, or JSON of the wrong
+shape — is an argparse usage error on stderr with exit code `2`, so there is no
+JSON payload to parse in that case.

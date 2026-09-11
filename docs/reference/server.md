@@ -39,6 +39,23 @@ async _safe(coro: Awaitable) -> Any
 
 Runs a client coroutine. Expected `AuthError` and `ForgejoError` failures, plus unexpected exceptions, become `ToolError`. `KeyboardInterrupt` and cancellation are not caught, so shutdown and cancellation can propagate correctly.
 
+### `_ToolServer` and `Id`
+
+`_ToolServer` is a thin `MCPServer` subclass overriding `call_tool`. Argument
+validation runs inside the SDK, before `_safe` can see it, and a rejection used
+to surface as raw multi-line Pydantic text — the one failure in this surface
+with no `[CODE]` to branch on. The override converts a `ToolError` whose
+`__cause__` is a Pydantic `ValidationError` into `[INVALID_INPUT] <tool>: <field>:
+<reason>`, and re-raises anything else untouched so a code from `_safe` survives.
+Both transports reach a tool through this method — the MCP wire handler calls it,
+and the CLI dispatches through it — so normalising here covers both.
+
+`Id` is `Annotated[int, Field(strict=True)]`, used for every numeric tool
+argument. Pydantic's default lax mode coerces `"7"`, `7.0` and `true` into
+integers, which turned a malformed call into a well-formed call against the wrong
+resource. The published JSON schema is unchanged (`{"type": "integer"}`), so MCP
+clients and the generated CLI see no new contract.
+
 ## Registered tools
 
 The server registers exactly these 31 tools:
@@ -141,7 +158,7 @@ async read_project(owner: str, repo: str, project_id: int,
                    limit: int | None = None, offset: int = 0) -> dict
 ```
 
-`bulk_read_issues` strips body and comments from successful results and separates per-issue failures into `errors`. The four full readers are marked expensive in their tool descriptions so MCP clients and agents can choose them deliberately.
+`bulk_read_issues` strips body and comments from successful results and separates per-issue failures into `errors`. A repeated issue number is read once, so `count` is the number of distinct issues read. The four full readers are marked expensive in their tool descriptions so MCP clients and agents can choose them deliberately.
 
 ### Milestone tools
 

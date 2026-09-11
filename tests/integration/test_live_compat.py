@@ -222,3 +222,94 @@ def test_the_board_markup_matches_the_profile_for_this_version(
     assert profile.search("board_title", html)
     board = run_async(live_client.get_project(owner, repo, project_id))
     assert [c["title"] for c in board["columns"] if c["title"] == "Matched"]
+
+
+def test_the_redirect_writes_really_do_redirect_on_this_version(
+    live_client, seeded_repo, run_async, writable
+):
+    """The success signal the write-integrity check depends on.
+
+    ``Profile.redirect_writes`` names the routes where HTTP 200 means "refused".
+    That inversion only holds while those routes still answer an *accepted*
+    write with a redirect, so each one is exercised here for real. If a release
+    ever switches one of them to 200-on-success, this fails loudly rather than
+    every write on it starting to look like a rejection.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    profile = live_client.profile
+    assert profile.redirect_writes == {
+        "project_new", "project_edit", "milestone_new", "milestone_edit"
+    }
+
+    title = unique("Redirects")
+    project_id = None
+    milestone_id = None
+    try:
+        checks = {}
+
+        r = run_async(live_client._request(
+            "POST", profile.route("project_new", owner=owner, repo=repo),
+            form={"redirect": "", "title": title, "content": "",
+                  "template_type": "", "card_type": profile.card_types["text"]},
+            follow=False))
+        checks["project_new"] = r.status
+        project_id = int(
+            [p for p in run_async(live_client.list_projects(owner, repo, "open"))
+             if p["title"] == title][-1]["id"]
+        )
+
+        r = run_async(live_client._request(
+            "POST",
+            profile.route("project_edit", owner=owner, repo=repo,
+                          project_id=project_id),
+            form={"redirect": "", "title": title + " v2", "content": "",
+                  "card_type": profile.card_types["text"]},
+            follow=False))
+        checks["project_edit"] = r.status
+
+        r = run_async(live_client._request(
+            "POST", profile.route("milestone_new", owner=owner, repo=repo),
+            form={"title": title, "content": "", "deadline": ""}, follow=False))
+        checks["milestone_new"] = r.status
+        milestone_id = int(
+            [m for m in run_async(live_client.list_milestones(owner, repo, "open"))
+             if m["title"] == title][-1]["id"]
+        )
+
+        r = run_async(live_client._request(
+            "POST",
+            profile.route("milestone_edit", owner=owner, repo=repo,
+                          milestone_id=milestone_id),
+            form={"title": title + " v2", "content": "", "deadline": ""},
+            follow=False))
+        checks["milestone_edit"] = r.status
+
+        assert all(300 <= status < 400 for status in checks.values()), checks
+    finally:
+        if milestone_id is not None:
+            run_async(live_client.delete_milestone(owner, repo, milestone_id))
+        if project_id is not None:
+            run_async(live_client.delete_project(owner, repo, project_id))
+
+
+def test_a_refused_form_is_recognised_on_this_version(
+    live_client, seeded_repo, run_async, writable
+):
+    """The other half: a refusal must be readable as one.
+
+    Forgejo answers a refused form with HTTP 200 and re-renders it with a flash
+    error. Both the status and the message element are contracts here, and the
+    message element gained an attribute in Forgejo 13, so it is matched live.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    profile = live_client.profile
+
+    r = run_async(live_client._request(
+        "POST", profile.route("milestone_new", owner=owner, repo=repo),
+        form={"title": unique("Refused"), "content": "", "deadline": "2026-02-30"},
+        follow=False))
+
+    assert r.status == 200, "a refused form is expected to re-render, not redirect"
+    assert profile.search("form_error", run_async(r.text())), (
+        "no form_error pattern matches this instance's flash message"
+    )

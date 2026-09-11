@@ -111,7 +111,9 @@ client reads everything version-dependent out of it:
   `profile.route(name, **params)`;
 - **patterns** — every scraped element is an *ordered tuple of candidate regular
   expressions*, and the first that matches wins;
-- **form values** — such as the card-type map; and
+- **form values** — such as the card-type map;
+- **write signalling** — `redirect_writes`, the routes where an accepted write
+  redirects and a refused one re-renders the form as HTTP 200; and
 - **CSRF strategy** — `origin` or `token`.
 
 A profile is the base (newest verified) behavior with every matching `Quirk`
@@ -136,6 +138,13 @@ Detection never becomes a single point of failure:
 `forgejo_status` and `authenticate` report the detected version and the
 resolved profile, including whether the version is inside the range the
 integration suite exercises.
+
+Not everything version-dependent *turns out* to be version-dependent. The
+write-signalling contract, the card-type values, and Forgejo's acceptance of
+blank project and column titles were probed on all twelve supported releases and
+are identical on every one, so they live in the base profile with no quirk
+attached. A quirk is for a difference that was actually observed between
+releases, not for one that might exist.
 
 ## Data and identity model
 

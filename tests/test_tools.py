@@ -125,8 +125,49 @@ def test_move_card_forwards_arguments(monkeypatch):
 
 def test_missing_required_argument_is_rejected():
     # move_card requires column_id; omitting it must fail validation.
-    with pytest.raises(Exception):
+    with pytest.raises(ToolError) as exc:
         call("move_card", owner="o", repo="r", project_id=1, issue_numbers=[1])
+    assert "[INVALID_INPUT]" in str(exc.value)
+
+
+@pytest.mark.parametrize("bad", ["2", 2.0, True])
+def test_a_number_that_is_not_an_integer_is_refused_rather_than_coerced(bad):
+    """'2', 2.0 and true were all coerced onto real issue numbers."""
+    with pytest.raises(ToolError) as exc:
+        call("bulk_read_issues", owner="o", repo="r", issue_numbers=[bad])
+    assert "[INVALID_INPUT]" in str(exc.value)
+    assert "issue_numbers" in str(exc.value)
+
+
+def test_a_wrongly_shaped_argument_reports_a_stable_code():
+    """A dict where a list belongs used to surface as raw pydantic text."""
+    with pytest.raises(ToolError) as exc:
+        call("bulk_read_issues", owner="o", repo="r", issue_numbers={"a": 1})
+    assert "[INVALID_INPUT]" in str(exc.value)
+    assert "errors.pydantic.dev" not in str(exc.value)
+
+
+def test_an_error_raised_by_a_tool_keeps_its_own_code(monkeypatch):
+    """Only argument validation is relabelled; _safe's codes must survive."""
+    async def boom(*a, **k):
+        raise ForgejoError("gone", status=404, code="MILESTONE_NOT_FOUND")
+
+    patch(monkeypatch, "read_milestone_content", boom)
+    with pytest.raises(ToolError) as exc:
+        call("read_milestone", owner="o", repo="r", milestone_id=9)
+    assert "[MILESTONE_NOT_FOUND]" in str(exc.value)
+    assert "[INVALID_INPUT]" not in str(exc.value)
+
+
+def test_a_valid_call_still_reaches_the_tool(monkeypatch):
+    """The call_tool override must delegate, not just filter."""
+    async def fake(owner, repo, numbers, state="all"):
+        return [{"number": n, "title": "t", "state": "open", "milestone": None}
+                for n in numbers]
+
+    patch(monkeypatch, "bulk_read_issues", fake)
+    out = result_json(call("bulk_read_issues", owner="o", repo="r", issue_numbers=[7]))
+    assert out["count"] == 1
 
 
 def test_bulk_read_issues_tool_returns_summaries(monkeypatch):

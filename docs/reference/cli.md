@@ -28,10 +28,20 @@ JSON-schema types are mapped as follows:
 | `integer` | `int` |
 | `number` | `float` |
 | `boolean` | `_bool`, displayed as `true\|false` |
-| `array` or `object` | `json.loads` on a JSON string |
+| `array` or `object` | `_json_value`: `json.loads` on a JSON string, then a shape check |
 | other / omitted | argparse's default string behavior |
 
 Optional schema defaults are passed through to argparse.
+
+The type is read through `_schema_type`, which looks inside `anyOf`. An optional
+tool argument is published as `{"anyOf": [{"type": "integer"}, {"type": "null"}]}`
+with no type of its own, so reading only the top-level `type` attached no
+converter and handed the tool a string — harmless while argument validation
+coerced it, and a rejected call once identifiers are matched strictly.
+
+`_json_value` also enforces the shape the schema asks for: an object passed where
+an array belongs raises `argparse.ArgumentTypeError`, which argparse reports as a
+usage error with exit code `2` rather than passing the wrong type to the tool.
 
 ### `_bool`
 
