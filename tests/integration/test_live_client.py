@@ -13,6 +13,7 @@ file covers everything around them.
 from __future__ import annotations
 
 import time
+import uuid
 from html import unescape
 
 import pytest
@@ -33,7 +34,8 @@ from .helpers import (
 def test_list_repositories_returns_the_full_repository_shape(
     live_client, seeded_repo, run_async
 ):
-    """Every field the tool layer exposes is present and typed as promised."""
+    """Every field the tool layer exposes is present; the ones the route cannot
+    supply are null rather than a guess."""
     repos = run_async(live_client.list_repositories(query=seeded_repo.name))
 
     assert len(repos) == 1
@@ -41,13 +43,54 @@ def test_list_repositories_returns_the_full_repository_shape(
         "full_name": seeded_repo.full_name,
         "owner": seeded_repo.owner,
         "name": seeded_repo.name,
-        "description": repos[0]["description"],
+        "description": None,
         "private": False,
-        "archived": False,
-        "empty": False,
+        "archived": None,
+        "empty": None,
         "fork": False,
     }
-    assert isinstance(repos[0]["description"], str)
+
+
+def test_the_search_route_still_hard_codes_what_the_client_reports_as_null(
+    live_client, forgejo_target, run_async, writable
+):
+    """The client reports description, archived and empty as null because this
+    route answers "" and false for them whatever the repository is. If a
+    release starts sending the real values, this fails, and the client should
+    pass them on instead.
+    """
+    prefix = f"trimmed-{uuid.uuid4().hex[:8]}"
+    owner = forgejo_target.username
+    forgejo_target.api("POST", "/user/repos", {
+        "name": f"{prefix}-real", "description": "A real description",
+        "auto_init": True,
+    })
+    forgejo_target.api("PATCH", f"/repos/{owner}/{prefix}-real", {"archived": True})
+    forgejo_target.api("POST", "/user/repos", {
+        "name": f"{prefix}-empty", "auto_init": False,
+    })
+
+    response = run_async(live_client._request(
+        "GET", live_client.profile.route("repo_search"), params={"q": prefix}))
+    raw = {
+        repo["full_name"]: repo
+        for repo in (
+            item.get("repository", item)
+            for item in run_async(response.json())["data"]
+        )
+    }
+    described = raw[f"{owner}/{prefix}-real"]
+    assert (described.get("description") or "", described.get("archived")) == (
+        "", False
+    ), "the route now reports description/archived; stop nulling them"
+    assert raw[f"{owner}/{prefix}-empty"].get("empty") is False, (
+        "the route now reports empty; stop nulling it"
+    )
+
+    reported = run_async(live_client.list_repositories(query=prefix))
+    assert {(r["description"], r["archived"], r["empty"]) for r in reported} == {
+        (None, None, None)
+    }
 
 
 def test_list_repositories_paginates(live_client, seeded_repo, offset_repo, run_async):
@@ -471,6 +514,50 @@ def test_moving_an_issue_that_is_not_on_the_board_says_so(
 
     assert exc.value.code == "CARD_NOT_FOUND"
     assert exc.value.status == 404
+
+
+def test_moving_a_card_to_an_unknown_column_says_so(
+    live_client, seeded_repo, live_project, run_async
+):
+    """Forgejo answers this with a bare HTTP 404 that names nothing."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    project_id = live_project["id"]
+    number = seeded_repo.issue_numbers[0]
+    run_async(live_client.add_issues_to_project(owner, repo, project_id, [number]))
+    before = run_async(live_client.get_project(owner, repo, project_id))
+
+    with pytest.raises(ForgejoError) as exc:
+        run_async(live_client.move_card(
+            owner, repo, project_id, 999_999, [number]))
+
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+    assert exc.value.status == 404
+    assert run_async(live_client.get_project(owner, repo, project_id)) == before
+
+
+def test_a_batch_with_an_unknown_destination_moves_nothing(
+    live_client, seeded_repo, live_project, run_async
+):
+    """The valid move in this batch used to land while the call reported
+    failure, so the board had changed behind an error."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    project_id = live_project["id"]
+    target = int(run_async(live_client.create_column(
+        owner, repo, project_id, "Target"))["column"]["id"])
+    first, second = seeded_repo.issue_numbers[0], seeded_repo.issue_numbers[1]
+    run_async(
+        live_client.add_issues_to_project(owner, repo, project_id, [first, second])
+    )
+    before = run_async(live_client.get_project(owner, repo, project_id))
+
+    with pytest.raises(ForgejoError) as exc:
+        run_async(live_client.bulk_move_cards(owner, repo, project_id, [
+            {"issue_number": first, "column_id": target},
+            {"issue_number": second, "column_id": 999_999},
+        ]))
+
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+    assert run_async(live_client.get_project(owner, repo, project_id)) == before
 
 
 def test_re_adding_an_issue_already_on_the_board_leaves_it_where_it_is(

@@ -66,7 +66,7 @@ Use the repository search tool to identify the exact owner and repository name:
 forgejo-projects-cli list_repositories --query platform --limit 10 --page 1
 ```
 
-The result includes `full_name`, `owner`, `name`, description, and repository flags such as `private` and `archived`.
+The result includes `full_name`, `owner`, `name`, and the `private` and `fork` flags. `description`, `archived` and `empty` are always `null`, because Forgejo's search route does not supply them.
 
 ## 5. Inspect or create a board
 

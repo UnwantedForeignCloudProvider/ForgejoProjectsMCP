@@ -181,6 +181,11 @@ async def authenticate(force: bool = False) -> dict:
 async def list_repositories(query: str = "", limit: Id = 50, page: Id = 1) -> dict:
     """List repositories the current user can access (for choosing where to manage projects).
 
+    ``description``, ``archived`` and ``empty`` are always null: the search
+    route Forgejo offers hard-codes them, so they are reported as unknown rather
+    than as an empty description on an unarchived, non-empty repository.
+    ``private`` and ``fork`` are real.
+
     Args:
         query: Optional name filter.
         limit: Max results (default 50).
@@ -394,8 +399,9 @@ async def move_card(
 ) -> dict:
     """Move one or more cards (issues, by number) into a column, in the given order.
 
-    Every issue must already be a card on this project; one that is not is
-    reported as not-found rather than attempted. An issue number may appear
+    Every issue must already be a card on this project and the column must be
+    on its board; either mistake is reported as not-found (CARD_NOT_FOUND or
+    COLUMN_NOT_FOUND) before anything is written. An issue number may appear
     only once per call.
     """
     return await _safe(
@@ -428,6 +434,13 @@ async def bulk_move_cards(
             same column are placed in the order listed. Runs concurrently, so an
             issue number may appear only once per call -- a card cannot be sent
             to two columns in one batch.
+
+    Every card and destination column is checked against the board before
+    anything is written, so an unknown column is COLUMN_NOT_FOUND and nothing
+    moves. Past that check the batch is not atomic: Forgejo moves one column per
+    request, with no undo. If one of those requests fails after others landed,
+    the call fails with BULK_MOVE_PARTIAL, naming the columns that moved and the
+    ones that did not; re-read the board before retrying.
     """
     return await _safe(client.bulk_move_cards(owner, repo, project_id, moves))
 

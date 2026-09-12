@@ -228,8 +228,22 @@ Repository selection uses a JSON web endpoint rather than an HTML page.
 
 The response is expected to contain a `data` array. Each item may either be the
 repository object itself or wrap it in `repository`. The client reads
-`full_name`, `description`, `private`, `archived`, `empty`, and `fork`; owner
-and repository name are derived by splitting `full_name`.
+`full_name`, `private` and `fork`; owner and repository name are derived by
+splitting `full_name`.
+
+**The route answers with a trimmed repository object.** `description` is always
+`""`, and `archived` and `empty` are always `false`, whatever the repository
+really is (verified on 1.20, 14, 15 and 16 with a described, an archived and an
+empty repository). `private` and `fork` are real. The client reports the three
+trimmed fields as `null` rather than pass on a wrong answer, and a live test
+asserts that the route still trims them, so a release that starts sending real
+values is noticed.
+
+The documented `GET /api/v1/repos/search` does return all of them, but it does
+not honour the web session: called with the client's cookie it answers as an
+anonymous user and omits the user's private repositories (verified on 1.20, 14,
+15 and 16). A cached session carries no password to authenticate it another
+way, so the client cannot use it.
 
 **Pagination boundaries are Forgejo's, and the client does not clamp them**
 (verified on 14, 15 and 16):
@@ -553,11 +567,24 @@ B" is not a state Forgejo can represent. The client's optional `project_id` is
 therefore a client-side guard, not a scope: it refuses the call when an issue is
 not a card on the named board. The route itself is unchanged.
 
-**Moving an issue that is not a card on the project answers HTTP 500**, the same
-shape as an unknown column id would (verified on 15 and 16). The client reads
-the board first and reports `[CARD_NOT_FOUND]` (404) naming the issue numbers
-that are not on it, so "not attached here" is distinguishable from a server
-fault. `bulk_move_cards` applies the same check once for the whole batch.
+**A misaddressed move names nothing.** Moving an issue that is not a card on the
+project answers a bare HTTP 500, and moving to a column that is not on the
+board answers a bare HTTP 404 (both verified on 1.20, 14, 15 and 16). The
+client reads the board once before writing and reports `[CARD_NOT_FOUND]` or
+`[COLUMN_NOT_FOUND]` (404) naming what is not on it, so "not here" is
+distinguishable from a server fault. On 1.20 the default column is `0` and is
+rendered even when empty, so it passes the check; on 14, 15 and 16 `0` is not
+a column, and the route answers it with 404 like any other unknown id.
+
+**`bulk_move_cards` is not atomic.** The route moves one column per request,
+with no transaction and no undo. Checking every card and destination first
+removes the deterministic cause of a half-applied batch, but a request can
+still fail after others have landed (a column deleted meanwhile, a server
+fault). The client then waits for every request to settle and reports
+`[BULK_MOVE_PARTIAL]`, naming the columns that moved and those that did not. It
+does not roll back: the board exposes card order but not the stored `sorting`
+values a faithful rollback would need, and a rollback that failed would leave a
+third state.
 
 **Re-attaching an issue that is already on the project does not move its card.**
 The card keeps its column and position; only a *different* project's id

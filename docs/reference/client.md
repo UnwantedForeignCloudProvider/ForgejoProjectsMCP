@@ -147,13 +147,15 @@ Requests `/repo/search` and normalizes each result to:
     "full_name": str | None,
     "owner": str,
     "name": str,
-    "description": str,
+    "description": None,
     "private": bool | None,
-    "archived": bool | None,
-    "empty": bool | None,
+    "archived": None,
+    "empty": None,
     "fork": bool | None,
 }
 ```
+
+`description`, `archived` and `empty` are always `None`. The route answers them as `""` and `false` whatever the repository is, so they are reported as unknown rather than passed on; the documented REST search, which has the real values, treats the web session as anonymous.
 
 #### `list_projects`
 
@@ -277,7 +279,7 @@ Resolves issue IDs and posts JSON shaped like:
 {"issues": [{"issueID": 1042, "sorting": 0}, {"issueID": 1043, "sorting": 1}]}
 ```
 
-The return value includes the original issue numbers, target column ID, and the upstream JSON body when available. Unlike attach, this does not read the board back: the route reports success explicitly, and `_require_cards` has already read the board as a precondition.
+Before writing, one board read (`_require_board_targets`) confirms every issue is a card on the project and the column is on its board, raising `CARD_NOT_FOUND` or `COLUMN_NOT_FOUND`. The return value includes the original issue numbers, target column ID, and the upstream JSON body when available. Unlike attach, this does not read the board back: the route reports success explicitly, and the board has already been read as a precondition.
 
 #### `create_issue` and `delete_issue`
 
@@ -351,6 +353,8 @@ async bulk_move_cards(owner, repo, project_id,
 ```
 
 Each move has `issue_number` and `column_id`. Issue ID resolution runs concurrently. Moves are grouped by column; each column request preserves the order of its input group, and column requests run concurrently.
+
+Before anything is written, one board read (`_require_board_targets`) confirms every card and every destination column, raising `CARD_NOT_FOUND` or `COLUMN_NOT_FOUND`, so an unknown column moves nothing. Past that check the batch is not atomic. Column requests run with `return_exceptions=True`, so every one settles before the call returns. If none failed, the result is `{moved_count, columns}`. If all failed, the first error is re-raised unchanged. If some landed and others failed, it raises `BULK_MOVE_PARTIAL` naming both sets. There is no rollback: the board does not expose the stored `sorting` values a faithful one would need.
 
 ### Milestones
 

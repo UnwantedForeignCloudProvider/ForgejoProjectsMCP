@@ -29,6 +29,12 @@ produce the situation they cover, and they are only meaningful here:
   needs Forgejo to accept an attach and then not show the card. It attaches
   reliably on every release from 1.20 to 16, so the guard is for a future one
   that stops; the successful path is covered live.
+* ``test_a_partly_applied_batch_says_what_landed`` and
+  ``test_a_batch_that_moved_nothing_keeps_the_underlying_error`` -- need a
+  per-column move to fail after the board read has confirmed every card and
+  destination. Only a column deleted mid-batch or a genuine server fault could
+  do that, and neither can be produced on demand. The check that removes the
+  deterministic cause is covered live.
 """
 
 import asyncio
@@ -348,6 +354,13 @@ def test_request_retries_after_session_bounce():
 
 # ---------------------------------------------------------------- repositories
 def test_list_repositories_parses_json():
+    """description, archived and empty are null whatever the route sends.
+
+    Forgejo's search route hard-codes them ("" and false), so passing them on
+    would report every repository as an unarchived, non-empty one with no
+    description. The values here are deliberately not the hard-coded ones, to
+    show they are not read at all.
+    """
     def handler(method, path, kw):
         assert path == "/repo/search"
         return FakeResponse(
@@ -355,7 +368,7 @@ def test_list_repositories_parses_json():
             json_data={
                 "data": [
                     {"repository": {"full_name": "o/r", "private": True,
-                                    "archived": False, "empty": False, "fork": False,
+                                    "archived": True, "empty": True, "fork": True,
                                     "description": "d"}}
                 ]
             },
@@ -364,8 +377,8 @@ def test_list_repositories_parses_json():
     c = make_client(handler)
     repos = run(c.list_repositories(query="r"))
     assert repos == [{
-        "full_name": "o/r", "owner": "o", "name": "r", "description": "d",
-        "private": True, "archived": False, "empty": False, "fork": False,
+        "full_name": "o/r", "owner": "o", "name": "r", "description": None,
+        "private": True, "archived": None, "empty": None, "fork": True,
     }]
 
 
@@ -812,6 +825,116 @@ def test_move_card_builds_json_payload():
         {"issueID": 43, "sorting": 1},
     ]}
     assert out["result"] == {"ok": True}
+
+
+def test_moving_a_card_to_an_unknown_column_says_so():
+    """Forgejo answers a move to a column that is not on the board with a bare
+    status that names nothing, so the destination is checked on the board read
+    the card check already makes."""
+    def handler(method, path, kw):
+        if method == "GET" and path == f"{REPO}/projects/1":
+            return FakeResponse(status=200, text=MOVE_BOARD)
+        return FakeResponse(status=200, text=_issue_page(42))
+
+    c = make_client(handler)
+
+    with pytest.raises(ForgejoError) as exc:
+        run(c.move_card("o", "r", 1, 99, [7]))
+
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+    assert exc.value.status == 404
+    assert "99" in str(exc.value)
+    assert not [x for x in c._ctx.calls if x["method"] == "POST"]
+
+
+def test_a_batch_with_an_unknown_destination_moves_nothing():
+    """The valid move in this batch used to land while the call reported
+    failure, leaving the board changed behind an error."""
+    def handler(method, path, kw):
+        if method == "GET" and path == f"{REPO}/projects/1":
+            return FakeResponse(status=200, text=MOVE_BOARD)
+        return FakeResponse(status=200, text=_issue_page(42))
+
+    c = make_client(handler)
+
+    with pytest.raises(ForgejoError) as exc:
+        run(c.bulk_move_cards("o", "r", 1, [
+            {"issue_number": 7, "column_id": 9},
+            {"issue_number": 8, "column_id": 999_999},
+        ]))
+
+    assert exc.value.code == "COLUMN_NOT_FOUND"
+    assert "999999" in str(exc.value)
+    assert not [x for x in c._ctx.calls if x["method"] == "POST"]
+
+
+# Issues 7 and 8 as cards in two columns, for batches that span both.
+TWO_COLUMN_BOARD = """
+<div class="project-column" data-id="5"><span class="project-column-title-label">Todo</span>
+<div data-issue="42"><a href="/o/r/issues/7">Seven</a></div>
+</div>
+<div class="project-column" data-id="6"><span class="project-column-title-label">Done</span>
+<div data-issue="43"><a href="/o/r/issues/8">Eight</a></div>
+</div>
+"""
+
+
+def _two_column_handler(failing_columns):
+    def handler(method, path, kw):
+        if method == "GET" and path == f"{REPO}/projects/1":
+            return FakeResponse(status=200, text=TWO_COLUMN_BOARD)
+        if path == f"{REPO}/issues/7":
+            return FakeResponse(status=200, text=_issue_page(42))
+        if path == f"{REPO}/issues/8":
+            return FakeResponse(status=200, text=_issue_page(43))
+        m = re.fullmatch(rf"{REPO}/projects/1/(\d+)/move", path)
+        if method == "POST" and m:
+            if int(m.group(1)) in failing_columns:
+                return FakeResponse(status=500, text="boom")
+            return FakeResponse(status=200, json_data={"ok": True})
+        return FakeResponse(status=200)
+    return handler
+
+
+def test_a_partly_applied_batch_says_what_landed():
+    """A failed column used to surface while the other columns' moves were
+    still in flight, so a move could land after the error was returned and a
+    caller reconciling straight away read a board that was about to change.
+
+    Every move is now awaited, and the error names what landed and what did
+    not. The failing column is listed first, which is the order that exposed
+    the in-flight move.
+    """
+    c = make_client(_two_column_handler(failing_columns={6}))
+
+    with pytest.raises(ForgejoError) as exc:
+        run(c.bulk_move_cards("o", "r", 1, [
+            {"issue_number": 7, "column_id": 6},
+            {"issue_number": 8, "column_id": 5},
+        ]))
+
+    assert exc.value.code == "BULK_MOVE_PARTIAL"
+    message = str(exc.value)
+    assert "column 5 (issues [8])" in message
+    assert "column 6 (issues [7])" in message
+    # Both writes had completed by the time the error was raised.
+    assert find_call(c, "POST", f"{REPO}/projects/1/6/move") is not None
+    assert find_call(c, "POST", f"{REPO}/projects/1/5/move") is not None
+
+
+def test_a_batch_that_moved_nothing_keeps_the_underlying_error():
+    """Nothing landed, so there is nothing to reconcile and no reason to hide
+    Forgejo's own error behind a partial-move code."""
+    c = make_client(_two_column_handler(failing_columns={5, 6}))
+
+    with pytest.raises(ForgejoError) as exc:
+        run(c.bulk_move_cards("o", "r", 1, [
+            {"issue_number": 7, "column_id": 6},
+            {"issue_number": 8, "column_id": 5},
+        ]))
+
+    assert exc.value.code == "HTTP_500"
+    assert exc.value.status == 500
 
 
 _ATTACHED_BOARD = (

@@ -916,14 +916,19 @@ class ForgejoClient:
                 code="COLUMN_NOT_FOUND",
             )
 
-    async def _require_cards(self, owner, repo, project_id, numbers) -> None:
-        """Fail clearly when an issue being moved is not a card on this board.
+    async def _require_board_targets(
+        self, owner, repo, project_id, numbers, column_ids=()
+    ) -> None:
+        """Fail clearly when a card or a destination is not on this board.
 
         Forgejo answers a move for an issue that is not attached to the project
         with a bare HTTP 500, which reads as a server fault rather than the
-        addressing mistake it is. The board already has to be readable for the
-        move to mean anything, so it is read first and the missing numbers are
-        named.
+        addressing mistake it is, and a move to a column that is not on the
+        board with a bare 404 that names nothing. The board already has to be
+        readable for the move to mean anything, so one read checks both before
+        anything is written -- which is also what stops a batch from applying
+        its valid moves and then failing on the one destination that does not
+        exist.
         """
         board = await self.get_project(owner, repo, project_id)
         on_board = {
@@ -936,6 +941,14 @@ class ForgejoClient:
                 "attach them with add_issues_to_project first.",
                 status=404,
                 code="CARD_NOT_FOUND",
+            )
+        known = {column["id"] for column in board["columns"]}
+        unknown = sorted({c for c in column_ids if c not in known})
+        if unknown:
+            raise ForgejoError(
+                f"Column(s) {unknown} are not on project {project_id}.",
+                status=404,
+                code="COLUMN_NOT_FOUND",
             )
 
     async def _require_reference(
@@ -1002,10 +1015,15 @@ class ForgejoClient:
                     "full_name": repo.get("full_name"),
                     "owner": (repo.get("full_name") or "/").split("/")[0],
                     "name": (repo.get("full_name") or "/").split("/")[-1],
-                    "description": repo.get("description") or "",
+                    # This route answers with a trimmed repository object: the
+                    # description is always "" and archived/empty are always
+                    # false, whatever the repository really is (verified on
+                    # 1.20, 14, 15 and 16). They are reported as unknown rather
+                    # than passed on as facts.
+                    "description": None,
                     "private": repo.get("private"),
-                    "archived": repo.get("archived"),
-                    "empty": repo.get("empty"),
+                    "archived": None,
+                    "empty": None,
                     "fork": repo.get("fork"),
                 }
             )
@@ -1433,7 +1451,7 @@ class ForgejoClient:
         invites.
         """
         if project_id is not None:
-            await self._require_cards(owner, repo, project_id, issue_numbers)
+            await self._require_board_targets(owner, repo, project_id, issue_numbers)
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         await self._request(
             "POST",
@@ -1447,7 +1465,9 @@ class ForgejoClient:
         self, owner, repo, project_id, column_id, issue_numbers: list[int]
     ) -> dict[str, Any]:
         self._require_unique_numbers(issue_numbers, "move")
-        await self._require_cards(owner, repo, project_id, issue_numbers)
+        await self._require_board_targets(
+            owner, repo, project_id, issue_numbers, [column_id]
+        )
         ids = await self._resolve_ids(owner, repo, issue_numbers)
         payload = {
             "issues": [
@@ -1902,7 +1922,9 @@ class ForgejoClient:
         concurrently (rate-limited)."""
         numbers = [m["issue_number"] for m in moves]
         self._require_unique_numbers(numbers, "bulk move")
-        await self._require_cards(owner, repo, project_id, numbers)
+        await self._require_board_targets(
+            owner, repo, project_id, numbers, [m["column_id"] for m in moves]
+        )
         ids = await asyncio.gather(
             *[self.resolve_issue_id(owner, repo, n) for n in numbers]
         )
@@ -1932,10 +1954,46 @@ class ForgejoClient:
             )
             return {"column_id": col, "moved": col_nums}
 
-        columns = await asyncio.gather(
-            *[_move(c, ns) for c, ns in groups.items()]
+        items = list(groups.items())
+        # Every move is awaited even after one fails. gather's default hands
+        # back the first error while the other columns' writes are still in
+        # flight, so a move could land after the caller had been told the batch
+        # failed, and a board read made in response would already be stale.
+        results = await asyncio.gather(
+            *[_move(c, ns) for c, ns in items], return_exceptions=True
         )
-        return {"moved_count": len(moves), "columns": list(columns)}
+        for result in results:
+            # Cancellation is not the outcome of a move; let it propagate.
+            if isinstance(result, BaseException) and not isinstance(result, Exception):
+                raise result
+        failed = [
+            (item, result)
+            for item, result in zip(items, results, strict=True)
+            if isinstance(result, Exception)
+        ]
+        applied = [r for r in results if not isinstance(r, BaseException)]
+        if not failed:
+            return {"moved_count": len(moves), "columns": applied}
+        first = failed[0][1]
+        if not applied:
+            # Nothing landed, so there is nothing to reconcile: Forgejo's own
+            # error says more than a partial-move code would.
+            raise first
+        # The per-column route has no transaction and no undo, and the board
+        # does not expose the sorting a rollback would need, so the honest
+        # option is to say exactly which moves landed.
+        raise ForgejoError(
+            f"{len(applied)} of {len(items)} column moves were applied before "
+            "the batch failed, so the board has changed. Applied: "
+            + ", ".join(f"column {r['column_id']} (issues {r['moved']})" for r in applied)
+            + ". Not applied: "
+            + "; ".join(
+                f"column {col} (issues {nums}): {err}" for (col, nums), err in failed
+            )
+            + ". Re-read the board before retrying.",
+            status=getattr(first, "status", None),
+            code="BULK_MOVE_PARTIAL",
+        )
 
     # ------------------------------------------------------------ milestones
     @staticmethod

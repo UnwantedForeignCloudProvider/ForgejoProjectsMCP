@@ -21,6 +21,13 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ### Changed
 
+- `list_repositories` reports `description`, `archived` and `empty` as `null`.
+  Forgejo's search route hard-codes them (an empty description, never archived,
+  never empty), so every repository came back looking like an unarchived,
+  non-empty one with no description, whatever it really was. `private` and
+  `fork` are real and unchanged. The documented REST search does return the
+  real values, but it treats the client's web session as anonymous and drops
+  private repositories, so it cannot stand in.
 - `add_issues_to_project` reads the board back and reports where each card
   landed. The attach route answers a write that changed nothing exactly like one
   that worked, so `attached` previously meant only that Forgejo had not refused
@@ -62,6 +69,16 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ### Fixed
 
+- `bulk_move_cards` no longer moves part of a batch and then reports failure
+  when one destination does not exist. Every card and destination column is
+  checked against the board before anything is written, so an unknown column is
+  `COLUMN_NOT_FOUND` and nothing moves. `move_card` checks its column the same
+  way instead of passing on Forgejo's bare 404.
+- A `bulk_move_cards` batch that fails partway is reported as
+  `BULK_MOVE_PARTIAL`, naming the columns that moved and those that did not.
+  The other columns' requests used to be left in flight on the first failure,
+  so a move could land after the error had been returned, and a board read
+  made in response was already stale.
 - The full readers name an unusable filter instead of returning an empty result.
   Forgejo applies `project=` and `milestone=` as direct values and renders an
   ordinary empty issue list for an id it does not know, so
