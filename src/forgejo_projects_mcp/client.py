@@ -1515,6 +1515,11 @@ class ForgejoClient:
         if milestone_id is not None:
             form["milestone_id"] = str(milestone_id)
         if label_ids:
+            # Forgejo silently drops an unknown label id here and creates the
+            # issue without it, so an id it cannot resolve is confirmed against
+            # the label list first -- otherwise the caller could never tell a
+            # label went missing. Checked only when labels were asked for.
+            await self._require_labels_exist(owner, repo, label_ids)
             form["label_ids"] = ",".join(map(str, label_ids))
         if assignee_ids:
             form["assignee_ids"] = ",".join(map(str, assignee_ids))
@@ -2133,3 +2138,195 @@ class ForgejoClient:
             follow=False,
         )
         return {"deleted": True, "milestone_id": milestone_id}
+
+    # ---------------------------------------------------------------- labels
+    @staticmethod
+    def _parse_labels(
+        html: str, profile: Profile = DEFAULT_PROFILE
+    ) -> list[dict[str, Any]]:
+        """Read id, name, description and colour from the repo labels page.
+
+        Everything is taken from each label's edit button, whose data-*
+        attributes carry the values verbatim, so no separate edit-form read is
+        needed to preserve a field on update. Results are keyed by id (so a
+        duplicate render cannot double-count) and returned id-ordered.
+        """
+        out: dict[int, dict[str, Any]] = {}
+        for m in profile.finditer("label_row", html):
+            lid = int(m.group(1))
+            out[lid] = {
+                "id": lid,
+                "name": unescape(m.group(2).strip()),
+                "description": unescape(m.group(3)),
+                "color": m.group(4),
+            }
+        result = [out[k] for k in sorted(out)]
+        logger.debug(
+            "Parsed labels list input_chars=%d labels=%d", len(html), len(result)
+        )
+        return result
+
+    async def list_labels(self, owner, repo) -> list[dict[str, Any]]:
+        """Every label in the repository, id-ordered."""
+        html = await self._get_text(self._route("labels", owner=owner, repo=repo))
+        return self._parse_labels(html, self._profile)
+
+    def _require_label_color(self, color: str | None) -> str:
+        """Reject a colour Forgejo would answer with a bare HTTP 500.
+
+        The accepted shape is a profile contract (``label_color``) because it is
+        a Forgejo form value, not a rule of this client's own. An empty colour
+        is left for Forgejo to default.
+        """
+        if color is None or color == "":
+            return ""
+        pattern = self._profile.compiled("label_color")[0]
+        if not pattern.fullmatch(color):
+            raise ForgejoError(
+                f"Invalid label color {color!r}; expected a hex value such as "
+                "'#e01e5a' or '#abc' (Forgejo answers anything else with HTTP 500).",
+                status=400,
+                code="INVALID_INPUT",
+            )
+        return color
+
+    async def _require_labels_exist(self, owner, repo, label_ids: list[int]) -> None:
+        """Fail with a specific not-found before a route drops or 500s on a bad id.
+
+        Forgejo silently discards an unknown label id on issue creation and
+        answers an unknown one on the issue-label route with a bare HTTP 500, so
+        neither tells the caller which id was wrong. Confirming the ids against
+        the label list first turns both into one stable code.
+        """
+        known = {lbl["id"] for lbl in await self.list_labels(owner, repo)}
+        missing = sorted({lid for lid in label_ids if lid not in known})
+        if missing:
+            raise ForgejoError(
+                f"Label(s) {missing} do not exist in {owner}/{repo}.",
+                status=404,
+                code="LABEL_NOT_FOUND",
+            )
+
+    async def create_label(
+        self, owner, repo, name, color: str = "", description: str = ""
+    ) -> dict[str, Any]:
+        """Create a label and return it, read back from the label list.
+
+        Forgejo accepts an empty label name and creates a nameless label its own
+        pages then cannot address, so a blank name is refused here (like a
+        project or column title).
+        """
+        self._require_title(name, "label")
+        self._require_label_color(color)
+        await self._write(
+            "label_new",
+            "POST",
+            self._route("label_new", owner=owner, repo=repo),
+            form={"title": name, "description": description, "color": color},
+        )
+        labels = await self.list_labels(owner, repo)
+        match = [lbl for lbl in labels if lbl["name"] == name.strip()]
+        return {"created": True, "label": self._created(match, "label", name)}
+
+    async def edit_label(
+        self, owner, repo, label_id,
+        name: str | None = None, color: str | None = None,
+        description: str | None = None,
+    ) -> dict[str, Any]:
+        """Edit a label, leaving fields the caller did not name alone.
+
+        The edit route replaces the whole label, so anything omitted from the
+        form is cleared rather than kept. The current values come from the label
+        list (its edit button carries them), so ``None`` keeps a field and an
+        empty string clears it -- and an unknown id is reported as not-found
+        before anything is written.
+        """
+        labels = await self.list_labels(owner, repo)
+        current = next((lbl for lbl in labels if lbl["id"] == label_id), None)
+        if current is None:
+            raise ForgejoError(
+                f"Label {label_id} does not exist in {owner}/{repo}.",
+                status=404,
+                code="LABEL_NOT_FOUND",
+            )
+        form = {
+            "id": str(label_id),
+            "title": current["name"] if name is None else name,
+            "description": (
+                current["description"] if description is None else description
+            ),
+            "color": current["color"] if color is None else color,
+        }
+        self._require_title(form["title"], "label")
+        self._require_label_color(form["color"])
+        await self._write(
+            "label_edit",
+            "POST",
+            self._route("label_edit", owner=owner, repo=repo),
+            form=form,
+        )
+        return {"updated": True, "label_id": label_id}
+
+    async def delete_label(self, owner, repo, label_id) -> dict[str, Any]:
+        # Forgejo answers /labels/delete with HTTP 200 and a redirect body
+        # whether or not the label existed, so a delete of something already gone
+        # is indistinguishable from a real one. The label is looked up first so
+        # that "deleted" means a label was actually removed.
+        labels = await self.list_labels(owner, repo)
+        if not any(lbl["id"] == label_id for lbl in labels):
+            raise ForgejoError(
+                f"Label {label_id} does not exist in {owner}/{repo}.",
+                status=404,
+                code="LABEL_NOT_FOUND",
+            )
+        await self._request(
+            "POST",
+            self._route("label_delete", owner=owner, repo=repo),
+            form={"id": str(label_id)},
+            follow=False,
+        )
+        return {"deleted": True, "label_id": label_id}
+
+    async def _toggle_issue_labels(
+        self, owner, repo, number, label_ids: list[int], action: str
+    ) -> None:
+        """Attach or detach labels on one issue via the issue-label route.
+
+        The route addresses the issue by its *global* id, not its repo-local
+        number, and toggles one label per request, so the number is resolved
+        once and a request is sent per label. Every id is confirmed to exist
+        first, because an unknown one answers with a bare HTTP 500.
+        """
+        if not label_ids:
+            raise ForgejoError(
+                "At least one label id is required.",
+                status=400,
+                code="INVALID_INPUT",
+            )
+        await self._require_labels_exist(owner, repo, label_ids)
+        issue_id = await self.resolve_issue_id(owner, repo, number)
+        for lid in dict.fromkeys(label_ids):
+            await self._request(
+                "POST",
+                self._route("issue_labels", owner=owner, repo=repo),
+                form={"issue_ids": str(issue_id), "action": action, "id": str(lid)},
+                follow=False,
+            )
+
+    async def add_labels_to_issue(
+        self, owner, repo, number, label_ids: list[int]
+    ) -> dict[str, Any]:
+        """Attach labels (by id) to an existing issue (by number)."""
+        await self._toggle_issue_labels(owner, repo, number, label_ids, "attach")
+        return {"number": number, "added": list(dict.fromkeys(label_ids))}
+
+    async def remove_labels_from_issue(
+        self, owner, repo, number, label_ids: list[int]
+    ) -> dict[str, Any]:
+        """Detach labels (by id) from an existing issue (by number).
+
+        Detaching a label the issue does not carry is a no-op, so the result
+        describes the labels asked to be removed rather than what changed.
+        """
+        await self._toggle_issue_labels(owner, repo, number, label_ids, "detach")
+        return {"number": number, "removed": list(dict.fromkeys(label_ids))}

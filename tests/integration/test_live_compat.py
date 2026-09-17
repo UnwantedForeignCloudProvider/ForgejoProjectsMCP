@@ -238,12 +238,14 @@ def test_the_redirect_writes_really_do_redirect_on_this_version(
     owner, repo = seeded_repo.owner, seeded_repo.name
     profile = live_client.profile
     assert profile.redirect_writes == {
-        "project_new", "project_edit", "milestone_new", "milestone_edit"
+        "project_new", "project_edit", "milestone_new", "milestone_edit",
+        "label_new", "label_edit",
     }
 
     title = unique("Redirects")
     project_id = None
     milestone_id = None
+    label_id = None
     try:
         checks = {}
 
@@ -284,8 +286,27 @@ def test_the_redirect_writes_really_do_redirect_on_this_version(
             follow=False))
         checks["milestone_edit"] = r.status
 
+        r = run_async(live_client._request(
+            "POST", profile.route("label_new", owner=owner, repo=repo),
+            form={"title": title, "description": "", "color": "#ff0000"},
+            follow=False))
+        checks["label_new"] = r.status
+        label_id = int(
+            [lbl for lbl in run_async(live_client.list_labels(owner, repo))
+             if lbl["name"] == title][-1]["id"]
+        )
+
+        r = run_async(live_client._request(
+            "POST", profile.route("label_edit", owner=owner, repo=repo),
+            form={"id": str(label_id), "title": title + " v2",
+                  "description": "", "color": "#ff0000"},
+            follow=False))
+        checks["label_edit"] = r.status
+
         assert all(300 <= status < 400 for status in checks.values()), checks
     finally:
+        if label_id is not None:
+            run_async(live_client.delete_label(owner, repo, label_id))
         if milestone_id is not None:
             run_async(live_client.delete_milestone(owner, repo, milestone_id))
         if project_id is not None:

@@ -4,9 +4,10 @@ description: >-
   Manage Forgejo Projects / Kanban boards (which Forgejo does not expose over its
   REST API) from the command line via `forgejo-projects-cli`. Use when the user
   wants to list, create, edit, move, or delete Forgejo projects, board columns,
-  cards/issues, or milestones, or read a board/column/milestone's contents —
-  especially in a harness without MCP support. Triggers: "forgejo project",
-  "kanban board", "forgejo column/card/milestone", "move card", "read the board".
+  cards/issues, milestones, or labels, or read a board/column/milestone's
+  contents — especially in a harness without MCP support. Triggers: "forgejo
+  project", "kanban board", "forgejo column/card/milestone/label", "move card",
+  "label an issue", "read the board".
 ---
 
 # forgejo-projects-cli
@@ -50,22 +51,30 @@ forgejo-projects-cli authenticate --force true  # replace a cached session
 ```
 
 Options mirror each tool's parameters as `--flag` (e.g. `--owner`, `--repo`,
-`--project_id`). List/object parameters take a **JSON string**:
-`--issue_numbers '[5,6]'`, `--moves '[{"issue_number":5,"column_id":12}]'`.
+`--project_id`). List/object parameters take a **JSON string** of the shape the
+tool requests: `--issue_numbers '[5,6]'`,
+`--moves '[{"issue_number":5,"column_id":12}]'`. Malformed JSON, or a value of
+the wrong shape such as an object where an array belongs, is a usage error with
+exit code `2` rather than a JSON tool-error result.
 
 ## Conventions
 
-- **Ids vs numbers:** `--project_id`, `--column_id`, `--milestone_id` are numeric
-  ids (get them from `list_projects` / `get_project` / `list_milestones`).
-  Cards/issues are addressed by their **repo issue number** (the `#N` you see);
-  the tool resolves the internal id itself.
+- **Ids vs numbers:** `--project_id`, `--column_id`, `--milestone_id`,
+  `--label_id` / `--label_ids` are numeric ids (get them from `list_projects` /
+  `get_project` / `list_milestones` / `list_labels`). Cards/issues are addressed
+  by their **repo issue number** (the `#N` you see); the tool resolves the
+  internal id itself.
 - **`--state`** accepts `open`, `closed`, or `all`. An invalid value is a hard
   error (`[INVALID_STATE]`), not a silent default.
 - **Filters** on readers use ids: `--milestone <id>`, `--project <id>`.
+- **Argument types are strict:** send numeric ids as numbers, not strings,
+  floats, or booleans. Schema mismatches fail with `[INVALID_INPUT]`.
 - **Output is JSON on stdout**; parse it. Logs go to stderr — ignore for parsing.
 - **Errors:** a failed call prints `{"error": "[CODE] message"}` and exits
-  non-zero. Missing project/column/milestone/issue → hard error (`[NOT_FOUND]` /
-  `[MILESTONE_NOT_FOUND]` / `[COLUMN_NOT_FOUND]`), never an empty success.
+  non-zero. Missing project/column/milestone/label/issue → hard error
+  (`[NOT_FOUND]` / `[PROJECT_NOT_FOUND]` / `[MILESTONE_NOT_FOUND]` /
+  `[COLUMN_NOT_FOUND]` / `[LABEL_NOT_FOUND]` / `[CARD_NOT_FOUND]`), never an empty
+  success.
 
 ## Typical workflow
 
@@ -89,14 +98,26 @@ forgejo-projects-cli set_default_column --owner o --repo r --project_id 3 --colu
 
 # Cards
 forgejo-projects-cli create_issue --owner o --repo r --title "Fix login" --project_id 3
+forgejo-projects-cli add_issues_to_project --owner o --repo r --project_id 3 \
+    --issue_numbers '[5,6]'
 forgejo-projects-cli move_card    --owner o --repo r --project_id 3 --column_id 11 \
     --issue_numbers '[5]'
 forgejo-projects-cli bulk_move_cards --owner o --repo r --project_id 3 \
     --moves '[{"issue_number":5,"column_id":11},{"issue_number":6,"column_id":12}]'
+# The optional project id is a guard: if either issue is not on project 3,
+# nothing is detached. Without it, Forgejo clears the current assignment.
+forgejo-projects-cli remove_issues_from_project --owner o --repo r --project_id 3 \
+    --issue_numbers '[5,6]'
 
 # Milestones
 forgejo-projects-cli create_milestone --owner o --repo r --title "v1.0" --deadline 2026-12-31
 forgejo-projects-cli list_milestones  --owner o --repo r --state all
+
+# Labels (addressed by numeric id; resolve a name from list_labels)
+forgejo-projects-cli list_labels  --owner o --repo r
+forgejo-projects-cli create_label --owner o --repo r --name bug --color '#e01e5a'
+forgejo-projects-cli add_labels_to_issue    --owner o --repo r --number 5 --label_ids '[1,2]'
+forgejo-projects-cli remove_labels_from_issue --owner o --repo r --number 5 --label_ids '[1]'
 ```
 
 ## Reading content — mind the cost
@@ -125,6 +146,7 @@ forgejo-projects-cli read_project --owner o --repo r --project_id 3 \
 ## Notes
 
 - Destructive subcommands (`delete_project`, `delete_column`, `delete_issue`,
-  `delete_milestone`) are permanent — confirm intent before running them.
+  `delete_milestone`, `delete_label`) are permanent — confirm intent before
+  running them. Deleting a label also strips it from every issue that carried it.
 - This drives Forgejo's internal web UI routes (no official API), so treat it as
   best-effort automation, not a production-critical interface.

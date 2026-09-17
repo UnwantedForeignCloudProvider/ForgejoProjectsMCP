@@ -135,6 +135,17 @@ def set_issue_state(instance: ForgejoInstance, owner: str, repo: str, number: in
     )
 
 
+def issue_label_ids(instance: ForgejoInstance, owner: str, repo: str,
+                    number: int) -> set[int]:
+    """The ids of the labels currently on an issue, read through the REST API.
+
+    Used to verify the effect of the client's web-route label operations against
+    the documented API, rather than by re-parsing the page the client just used.
+    """
+    labels = instance.api("GET", f"/repos/{owner}/{repo}/issues/{number}/labels")
+    return {int(label["id"]) for label in labels or ()}
+
+
 def expire_session_after_next_probe(client) -> None:
     """Really log the session out, immediately after the client's next probe.
 

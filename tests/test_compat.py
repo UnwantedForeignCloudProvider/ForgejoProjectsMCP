@@ -169,6 +169,11 @@ def test_routes_render_with_owner_repo_and_ids():
         == "/o/r/projects/3/7/move"
     )
     assert profile.route("milestone_delete", owner="o", repo="r") == "/o/r/milestones/delete"
+    assert profile.route("labels", owner="o", repo="r") == "/o/r/labels"
+    assert profile.route("label_new", owner="o", repo="r") == "/o/r/labels/new"
+    assert profile.route("label_edit", owner="o", repo="r") == "/o/r/labels/edit"
+    assert profile.route("label_delete", owner="o", repo="r") == "/o/r/labels/delete"
+    assert profile.route("issue_labels", owner="o", repo="r") == "/o/r/issues/labels"
 
 
 def test_an_unknown_route_is_a_programming_error():
@@ -257,23 +262,29 @@ def test_redirect_writes_names_only_the_routes_that_redirect_on_success():
     profile = profile_for(Version(16, 0, 3))
 
     assert profile.redirect_writes == {
-        "project_new", "project_edit", "milestone_new", "milestone_edit"
+        "project_new", "project_edit", "milestone_new", "milestone_edit",
+        "label_new", "label_edit",
     }
     for ajax_route in (
         "column_new", "column", "column_default", "column_move",
         "issue_projects", "milestone_delete", "project_delete",
         "milestone_close", "project_close",
+        # delete and the issue-label toggle answer 200 with a JSON body
+        "label_delete", "issue_labels",
     ):
         assert ajax_route not in profile.redirect_writes
 
 
 def test_no_version_changes_which_writes_redirect():
-    """Live-probed on 1.20 through 16: the same four routes, everywhere."""
+    """Live-probed on 1.20 through 16: the same routes redirect, everywhere."""
     versions = [Version(1, 20, 6), Version(1, 21, 11), Version(9, 0, 3),
                 Version(14, 0, 5), Version(16, 0, 3)]
 
     assert {frozenset(profile_for(v).redirect_writes) for v in versions} == {
-        frozenset({"project_new", "project_edit", "milestone_new", "milestone_edit"})
+        frozenset({
+            "project_new", "project_edit", "milestone_new", "milestone_edit",
+            "label_new", "label_edit",
+        })
     }
 
 

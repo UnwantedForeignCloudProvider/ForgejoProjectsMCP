@@ -130,6 +130,17 @@ _ROUTES: Mapping[str, str] = {
     # NOTE: deletion is /milestones/delete?id=N -- /milestones/{id}/delete
     # answers 200 but does nothing.
     "milestone_delete": "/{owner}/{repo}/milestones/delete",
+    # labels
+    "labels": "/{owner}/{repo}/labels",
+    "label_new": "/{owner}/{repo}/labels/new",
+    "label_edit": "/{owner}/{repo}/labels/edit",
+    # NOTE: create and edit take the label id in the form; deletion posts the id
+    # to the collection route (like milestone_delete) and answers 200 whether or
+    # not the label existed.
+    "label_delete": "/{owner}/{repo}/labels/delete",
+    # Attach/detach a single label to/from one or more issues, addressed by
+    # their *global* issue ids (not repo-local numbers).
+    "issue_labels": "/{owner}/{repo}/issues/labels",
 }
 
 
@@ -245,6 +256,24 @@ _PATTERNS: Mapping[str, tuple[str, ...]] = {
     "comment_author": (r'class="author[^"]*"[^>]*>\s*([^<]+?)\s*</a>',),
     # Milestones list.
     "milestone_link": (r'href="[^"]*/milestone/(\d+)"[^>]*>\s*([^<]+?)\s*</a>',),
+    # Labels list. Each label on the repo labels page carries an edit button
+    # whose data-* attributes hold everything the client needs -- id, name,
+    # description and colour -- in a fixed attribute order verified identical on
+    # 1.20 and 16. One pattern reads them in that order. The name and
+    # description are HTML-escaped; the colour value is unquoted
+    # (data-color=#rrggbb), so it is captured up to the next space or '>'.
+    "label_row": (
+        r'class="edit-label-button"[^>]*\bdata-id="(\d+)"'
+        r'[^>]*\bdata-title="([^"]*)"'
+        r'[^>]*\bdata-description="([^"]*)"'
+        r"[^>]*\bdata-color=([^ >]*)",
+    ),
+    # Label colour accepted by the /labels form. Forgejo answers a colour it
+    # cannot parse (e.g. 'red', a stray non-hex character) with a bare HTTP 500,
+    # so the accepted shape is checked before sending. Unlike a project column,
+    # a label accepts the three-digit shorthand and an optional leading '#', so
+    # this is deliberately wider than column_color. Verified on 1.20 and 16.
+    "label_color": (r"#?(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})",),
     # New-issue response: Forgejo answers 200 with {"redirect": ".../issues/N"}.
     "created_issue_number": (r"/issues/(\d+)",),
 }
@@ -277,11 +306,14 @@ class Profile:
     # (column_new, column, column_default, column_move, issue_projects) answer
     # a success with 200 and a JSON body, project/milestone close and open
     # answer 200 from Forgejo 1.21 onward (1.20 redirects), and milestone_delete
-    # answers 200 whether or not the milestone existed. Live-probed on every
-    # release from 1.20 to 16: the four routes below redirect on success on all
-    # of them.
+    # /label_delete/issue_labels answer 200 whether or not the target existed.
+    # Live-probed on every release from 1.20 to 16: the routes below redirect on
+    # success on all of them (label_new and label_edit answer 303).
     redirect_writes: frozenset[str] = frozenset(
-        {"project_new", "project_edit", "milestone_new", "milestone_edit"}
+        {
+            "project_new", "project_edit", "milestone_new", "milestone_edit",
+            "label_new", "label_edit",
+        }
     )
     version: Version | None = None
     quirks: tuple[str, ...] = ()

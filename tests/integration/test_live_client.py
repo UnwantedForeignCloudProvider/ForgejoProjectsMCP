@@ -24,6 +24,7 @@ from forgejo_projects_mcp.compat import Version
 from .helpers import (
     add_comment,
     create_issue,
+    issue_label_ids,
     set_issue_state,
     unique,
     watch_requests,
@@ -349,6 +350,168 @@ def test_a_missing_milestone_is_reported_as_not_found(
 
     assert exc.value.code == "MILESTONE_NOT_FOUND"
     assert exc.value.status == 404
+
+
+# ---------------------------------------------------------------------- labels
+def test_label_create_edit_delete_round_trip(
+    live_client, seeded_repo, run_async, writable
+):
+    """A label made through the client reads back, edits in place, and deletes."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    name = unique("bug")
+    created = run_async(
+        live_client.create_label(owner, repo, name, color="#ff0000", description="a bug")
+    )["label"]
+    lid = created["id"]
+    assert created["name"] == name
+    assert created["color"].lstrip("#").lower() == "ff0000"
+    assert created["description"] == "a bug"
+    try:
+        # An edit that names only the description keeps the name and colour.
+        run_async(live_client.edit_label(owner, repo, lid, description="changed"))
+        after = next(
+            lbl for lbl in run_async(live_client.list_labels(owner, repo))
+            if lbl["id"] == lid
+        )
+        assert after["name"] == name
+        assert after["description"] == "changed"
+        assert after["color"].lstrip("#").lower() == "ff0000"
+    finally:
+        run_async(live_client.delete_label(owner, repo, lid))
+    assert lid not in {
+        lbl["id"] for lbl in run_async(live_client.list_labels(owner, repo))
+    }
+
+
+def test_labels_accept_the_shorthand_and_hashless_hex(
+    live_client, seeded_repo, run_async, writable
+):
+    """Forgejo accepts '#abc' and a hashless value for a label (a column 500s)."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    made = []
+    try:
+        for color in ("#abc", "abcdef"):
+            made.append(
+                run_async(
+                    live_client.create_label(owner, repo, unique("c"), color=color)
+                )["label"]["id"]
+            )
+        assert len(made) == 2
+    finally:
+        for lid in made:
+            try:
+                run_async(live_client.delete_label(owner, repo, lid))
+            except Exception:  # cleanup is best-effort on a disposable instance
+                pass
+
+
+def test_a_label_colour_forgejo_would_500_on_is_refused_first(
+    live_client, seeded_repo, run_async
+):
+    """A non-hex colour is rejected before Forgejo answers it with a bare 500."""
+    with pytest.raises(ForgejoError) as exc:
+        run_async(
+            live_client.create_label(
+                seeded_repo.owner, seeded_repo.name, unique("x"), color="red"
+            )
+        )
+    assert exc.value.code == "INVALID_INPUT"
+
+
+def test_editing_a_missing_label_is_reported_as_not_found(
+    live_client, seeded_repo, run_async
+):
+    with pytest.raises(ForgejoError) as exc:
+        run_async(
+            live_client.edit_label(seeded_repo.owner, seeded_repo.name, 999_999, name="x")
+        )
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    assert exc.value.status == 404
+
+
+def test_deleting_a_missing_label_is_not_reported_as_deleted(
+    live_client, seeded_repo, run_async
+):
+    """Forgejo answers /labels/delete with 200 even for an id that never existed."""
+    with pytest.raises(ForgejoError) as exc:
+        run_async(
+            live_client.delete_label(seeded_repo.owner, seeded_repo.name, 999_999)
+        )
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    assert exc.value.status == 404
+
+
+def test_add_and_remove_labels_address_the_issue_by_its_global_id(
+    live_client, offset_repo, forgejo_target, run_async, writable
+):
+    """The issue-label route keys off the global issue id, not the number.
+
+    The two coincide only in the first repository an instance creates, so
+    ``offset_repo`` (a second seeded repository) is where a number-vs-id mix-up
+    would attach the label to the wrong issue, or to none. The effect is checked
+    through the REST API, not by re-parsing the page the client just wrote.
+    """
+    owner, repo = offset_repo.owner, offset_repo.name
+    number = offset_repo.issue_numbers[0]
+    global_id = run_async(live_client.resolve_issue_id(owner, repo, number))
+    assert global_id != number, "expected the global id and the number to diverge"
+
+    lid = run_async(
+        live_client.create_label(owner, repo, unique("prio"), color="#00ff00")
+    )["label"]["id"]
+    try:
+        out = run_async(live_client.add_labels_to_issue(owner, repo, number, [lid]))
+        assert out == {"number": number, "added": [lid]}
+        assert lid in issue_label_ids(forgejo_target, owner, repo, number)
+
+        run_async(live_client.remove_labels_from_issue(owner, repo, number, [lid]))
+        assert lid not in issue_label_ids(forgejo_target, owner, repo, number)
+    finally:
+        run_async(live_client.delete_label(owner, repo, lid))
+
+
+def test_attaching_an_unknown_label_is_refused_before_the_500(
+    live_client, seeded_repo, forgejo_target, run_async
+):
+    """An unknown label answers the issue-label route with a bare 500."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    number = seeded_repo.issue_numbers[0]
+    before = issue_label_ids(forgejo_target, owner, repo, number)
+    with pytest.raises(ForgejoError) as exc:
+        run_async(live_client.add_labels_to_issue(owner, repo, number, [999_999]))
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    # nothing was attached
+    assert issue_label_ids(forgejo_target, owner, repo, number) == before
+
+
+def test_create_issue_applies_a_real_label_and_rejects_an_unknown_one(
+    live_client, seeded_repo, forgejo_target, run_async, writable
+):
+    """A valid label id sticks on the new issue; an unknown one is refused.
+
+    Forgejo silently drops an unknown label id and creates the issue anyway, so
+    the client validates the ids first -- the unknown case creates nothing.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    lid = run_async(
+        live_client.create_label(owner, repo, unique("area"), color="#123456")
+    )["label"]["id"]
+    try:
+        created = run_async(
+            live_client.create_issue(owner, repo, unique("Labelled"), label_ids=[lid])
+        )
+        number = created["number"]
+        assert lid in issue_label_ids(forgejo_target, owner, repo, number)
+
+        with pytest.raises(ForgejoError) as exc:
+            run_async(
+                live_client.create_issue(
+                    owner, repo, unique("BadLabel"), label_ids=[lid, 999_999]
+                )
+            )
+        assert exc.value.code == "LABEL_NOT_FOUND"
+    finally:
+        run_async(live_client.delete_label(owner, repo, lid))
 
 
 # Forgejo paginates these list pages at 20 entries, so one past that proves the

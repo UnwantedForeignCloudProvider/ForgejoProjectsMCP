@@ -87,7 +87,7 @@ Every request passes through `_request()`:
 
 ## Forgejo integration strategy
 
-Forgejo Projects / Kanban are accessed through the browser-facing web routes because the normal REST API does not expose them. The client uses Playwright's HTTP API rather than a browser UI, then scrapes HTML and regular expressions to recover project, column, issue, and milestone data.
+Forgejo Projects / Kanban are accessed through the browser-facing web routes because the normal REST API does not expose them. The client uses Playwright's HTTP API rather than a browser UI, then scrapes HTML and regular expressions to recover project, column, issue, milestone, and label data. Labels are the one area Forgejo *does* cover under `/api/v1`, but that API rejects the session cookie the client authenticates with (it wants a token or basic auth), so labels are driven through their web routes too, keeping one authentication path across the whole client.
 
 Projects and columns use repository paths such as:
 
@@ -180,7 +180,7 @@ Project reads regroup the selected issue content under the original board column
 The default test suite avoids a live Forgejo dependency. Fake Playwright contexts capture method, path, form, JSON payload, parameters, and response data. Tests cover:
 
 - login success, bad credentials, session bounce, and cache writes;
-- exact HTTP method/path contracts for projects, columns, cards, issues, and milestones;
+- exact HTTP method/path contracts for projects, columns, cards, issues, milestones, and labels;
 - HTML parsing and ID recovery;
 - state validation, pagination, filtering, partial bulk failures, throttling, and cleanup;
 - MCP tool registration, schema validation, error signaling, and lifecycle cleanup; and

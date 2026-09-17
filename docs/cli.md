@@ -65,6 +65,10 @@ forgejo-projects-cli move_card --owner o --repo r --project_id 3 --column_id 11 
     --issue_numbers '[5]'
 forgejo-projects-cli bulk_move_cards --owner o --repo r --project_id 3 \
     --moves '[{"issue_number":5,"column_id":11},{"issue_number":6,"column_id":12}]'
+
+forgejo-projects-cli list_labels  --owner o --repo r
+forgejo-projects-cli create_label --owner o --repo r --name bug --color '#e01e5a'
+forgejo-projects-cli add_labels_to_issue --owner o --repo r --number 5 --label_ids '[1,2]'
 ```
 
 ## Reading content — mind the cost

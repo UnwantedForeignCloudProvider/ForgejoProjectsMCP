@@ -78,6 +78,43 @@ def test_parse_milestones():
     ]
 
 
+# The repo labels page as Forgejo renders it: every label carries an edit button
+# whose data-* attributes hold id, name, description and colour. This markup is
+# identical on 1.20 and 16 (the colour value is unquoted on both).
+LABELS_HTML = """
+<ul class="issue-label-list">
+  <li class="item">
+    <a class="edit-label-button" href="#" data-id="1" data-title="bug"
+       data-num-issues="0" data-description="a &amp; b" data-color=#ff0000>Edit</a>
+    <a class="delete-button" href="#" data-url="/o/r/labels/delete" data-id="1">Delete</a>
+  </li>
+  <li class="item">
+    <a class="edit-label-button" href="#" data-id="2" data-title="enhancement"
+       data-num-issues="3" data-description="" data-color=#00ff00>Edit</a>
+  </li>
+</ul>
+"""
+
+
+def test_parse_labels():
+    got = ForgejoClient._parse_labels(LABELS_HTML)
+    assert got == [
+        {"id": 1, "name": "bug", "description": "a & b", "color": "#ff0000"},
+        {"id": 2, "name": "enhancement", "description": "", "color": "#00ff00"},
+    ]
+
+
+def test_parse_labels_is_empty_for_a_repo_with_no_labels():
+    assert ForgejoClient._parse_labels('<ul class="issue-label-list"></ul>') == []
+
+
+def test_parse_labels_dedupes_by_id():
+    # A label rendered twice (e.g. an extra data-id on the delete button) must
+    # not be counted twice; the row is keyed by id.
+    doubled = LABELS_HTML + LABELS_HTML
+    assert [lbl["id"] for lbl in ForgejoClient._parse_labels(doubled)] == [1, 2]
+
+
 ISSUE_HTML = """
 <meta property="og:title" content="My Card">
 <h1 class="tw-break-anywhere"> My Card <span class="index">#42</span> </h1>

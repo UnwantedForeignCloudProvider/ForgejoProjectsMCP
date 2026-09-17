@@ -43,6 +43,17 @@ milestones are addressed by numeric **id**.
 - `list_milestones`, `create_milestone`, `edit_milestone`,
   `close_milestone`, `reopen_milestone`, `delete_milestone`
 
+## Labels
+
+Addressed by numeric **id** (Forgejo offers no name lookup); resolve a name from
+`list_labels`.
+
+- `list_labels(owner, repo)` — `{id, name, color, description}` per label
+- `create_label`, `edit_label`, `delete_label`
+- `add_labels_to_issue(owner, repo, number, label_ids)` /
+  `remove_labels_from_issue(...)` — every id is validated first, so an unknown
+  label is `[LABEL_NOT_FOUND]` rather than Forgejo's bare HTTP 500
+
 ## Bulk reads
 
 Run concurrently and rate-limited.

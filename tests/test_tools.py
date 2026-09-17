@@ -109,6 +109,30 @@ def test_unexpected_error_is_generic_and_does_not_leak(monkeypatch):
     assert "internal detail" not in str(exc.value)
 
 
+def test_list_labels_wraps_count(monkeypatch):
+    async def fake(owner, repo):
+        return [{"id": 1, "name": "bug", "color": "#ff0000", "description": ""}]
+
+    patch(monkeypatch, "list_labels", fake)
+    out = result_json(call("list_labels", owner="o", repo="r"))
+    assert out == {"count": 1,
+                   "labels": [{"id": 1, "name": "bug", "color": "#ff0000", "description": ""}]}
+
+
+def test_add_labels_to_issue_forwards_arguments(monkeypatch):
+    captured = {}
+
+    async def fake(owner, repo, number, label_ids):
+        captured.update(locals())
+        return {"number": number, "added": label_ids}
+
+    patch(monkeypatch, "add_labels_to_issue", fake)
+    out = result_json(call("add_labels_to_issue", owner="o", repo="r",
+                           number=5, label_ids=[1, 2]))
+    assert captured["label_ids"] == [1, 2]
+    assert out == {"number": 5, "added": [1, 2]}
+
+
 def test_move_card_forwards_arguments(monkeypatch):
     captured = {}
 

@@ -87,7 +87,8 @@ python-dotenv) — copy `.env.example` to `.env` and fill it in; no `source`/
 `export` needed. Real environment variables already set (and an MCP client's own
 `env` block) take precedence. See `.env.example` for the full list, including the
 optional `FORGEJO_MCP_MAX_CONCURRENCY`, `FORGEJO_MCP_RPS`,
-`FORGEJO_MCP_TIMEOUT`, and `FORGEJO_MCP_LOG_LEVEL`.
+`FORGEJO_MCP_TIMEOUT`, `FORGEJO_MCP_LOG_LEVEL`, and `XDG_CONFIG_HOME` for
+relocating the session cache.
 
 The session and the non-secret connection settings are cached under
 `<config>/forgejo_projects_mcp/`, so **after the first successful login no
@@ -242,7 +243,11 @@ mcp_servers:
 
 **Cards / issues**
 - `create_issue(... project_id=)` — create an issue, optionally straight onto a board
-- `add_issues_to_project`, `remove_issues_from_project`
+- `add_issues_to_project(owner, repo, project_id, issue_numbers)` — move issues
+  onto a board and return `cards` naming the column where each one landed
+- `remove_issues_from_project(owner, repo, issue_numbers, project_id=None)` —
+  detach issues from their board; the optional project id is a safety guard that
+  refuses issues which are not cards on that board
 - `move_card(owner, repo, project_id, column_id, issue_numbers)`
 - `bulk_move_cards(owner, repo, project_id, moves)` — move many cards, each to its
   own column, in one call (`moves` = list of `{issue_number, column_id}`)
@@ -274,8 +279,14 @@ seconds).
 - `list_milestones`, `create_milestone`, `edit_milestone`,
   `close_milestone`, `reopen_milestone`, `delete_milestone`
 
+**Labels**
+- `list_labels`, `create_label`, `edit_label`, `delete_label`
+- `add_labels_to_issue`, `remove_labels_from_issue` — validate every label id
+  first, so an unknown one is `LABEL_NOT_FOUND` rather than a silent no-op
+
 Issue arguments use the **repo issue number** (what you see as `#N`); the server
-resolves the internal id automatically.
+resolves the internal id automatically. Labels are addressed by numeric **id**
+(resolve a name from `list_labels`).
 
 ## CLI (no MCP client needed)
 

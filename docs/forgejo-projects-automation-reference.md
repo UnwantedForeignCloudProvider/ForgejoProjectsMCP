@@ -621,11 +621,12 @@ cannot make this additive — it is how the route stores the relationship — so
 `add_issues_to_project` documents the move, and the same single assignment is
 what makes detaching global (below).
 
-Detaching with `id=0` clears the issue's project assignment **globally**: an
-issue attached to two boards is removed from both by one call. The route takes
-no project argument, so there is no project-scoped removal to expose. This is
-worth stating plainly wherever the operation is described, because the tool
-name (`remove_issues_from_project`) reads as though it were scoped to one.
+Detaching with `id=0` clears the issue's project assignment **without naming a
+project**. Because an issue holds only one assignment, the call removes it from
+whichever board currently owns it. The route takes no project argument, so there
+is no project-scoped removal to expose. This is worth stating plainly wherever
+the operation is described, because the tool name
+(`remove_issues_from_project`) reads as though it were scoped to one.
 
 Bulk movement groups requested cards by destination column and sends one move
 request per column. Ordering is relative to each destination group.
@@ -672,9 +673,13 @@ and a note names the fields worth re-reading (an unusable assignee cannot be
 looked up through any route the client uses). None of this costs anything on a
 successful create: the diagnosis runs only after a failure.
 
-An unknown label id is the one case with no error at all — the issue is created
-and the label is silently dropped. The client cannot detect this, because it has
-no labels route; a caller that needs labels applied must read the issue back.
+An unknown label id is the one case with no error at all — Forgejo creates the
+issue and silently drops the label. Because nothing after the fact reveals it,
+the client validates any `label_ids` against the labels list (section 11a)
+*before* posting the form and raises `[LABEL_NOT_FOUND]`, creating nothing — so
+an unusable label is reported rather than quietly discarded. This is the one
+sidebar reference checked ahead of the write rather than diagnosed after it; the
+check costs one request, and only when labels were supplied.
 
 The new issue's number arrives in one of **two shapes, depending on the
 release**:
@@ -873,6 +878,91 @@ raises `[MILESTONE_NOT_FOUND]` (404) when it is absent, so `deleted: true` means
 a milestone was actually removed. This is the one delete in the client that
 cannot be made idempotent-and-honest by reading the response.
 
+## 11a. Label pages
+
+Labels are the one area the client drives that Forgejo *also* covers under
+`/api/v1`. That API is not used, for the same reason as everywhere else: it does
+not accept the session cookie the client authenticates with (a cookie request to
+`/api/v1` answers HTTP 401, while a token or basic-auth request answers 200), so
+reaching it would mean provisioning and storing a token. The internal web routes
+below take the session cookie the client already holds, and their markup and
+behavior were probed identical on 1.20 and 16, so no quirk is scoped for them.
+
+### Routes and forms
+
+| Action | Method | Path | Form |
+|---|---|---|---|
+| List | GET | `/{owner}/{repo}/labels` | — |
+| Create | POST | `/{owner}/{repo}/labels/new` | `title`, `description`, `color` |
+| Edit | POST | `/{owner}/{repo}/labels/edit` | `id`, `title`, `description`, `color` |
+| Delete | POST | `/{owner}/{repo}/labels/delete` | `id` |
+| Attach/detach on issue | POST | `/{owner}/{repo}/issues/labels` | `issue_ids`, `action`, `id` |
+
+`title` is the label name. Create and edit answer an accepted write with a
+**303 redirect** to the labels page and are in `redirect_writes`; the edit route
+takes the label id in the form (not the path) and answers an **unknown id with
+HTTP 404**.
+
+### The labels list DOM contract
+
+Each label on the list page carries an edit button whose data attributes hold
+everything the client needs, in a fixed order verified on 1.20 and 16:
+
+```html
+<a class="edit-label-button" ... data-id="1" data-title="bug"
+   data-num-issues="0" data-description="a bug" data-color=#ff0000> ... </a>
+```
+
+The `label_row` pattern reads `data-id`, `data-title`, `data-description` and
+`data-color` from it. The colour value is **unquoted** (`data-color=#rrggbb`), so
+it is captured up to the next space or `>`; the name and description are
+HTML-escaped. Because the button carries the current values, an edit reads them
+straight from the list and merges, with no separate edit-form request.
+
+### Colour validation
+
+Forgejo answers a colour it cannot parse with a **bare HTTP 500**, so the
+accepted shape (`label_color`) is checked before sending. Unlike a project
+column, a label accepts the **three-digit shorthand** and an **optional leading
+`#`**: `#e01e5a`, `#abc`, `abcdef` and an empty value are all accepted (empty is
+left for Forgejo to default), while `red` and any non-hex character are refused
+as `[INVALID_INPUT]`. Verified on 1.20 and 16.
+
+### Delete answers 200 either way
+
+```http
+POST /{owner}/{repo}/labels/delete
+id={label_id}
+```
+
+Like the milestone collection delete, this answers **HTTP 200 with a
+`{"redirect": ...}` body whether or not the label existed**, so the client
+resolves the label against the list first and raises `[LABEL_NOT_FOUND]` (404)
+when it is absent, so `deleted: true` means a label was actually removed.
+
+### Attaching and detaching on an issue
+
+```http
+POST /{owner}/{repo}/issues/labels
+issue_ids={global_issue_id}&action={attach|detach|toggle|clear}&id={label_id}
+```
+
+Two contracts matter here:
+
+- **`issue_ids` is the issue's global id, not its repo-local number.** Passing a
+  number attaches the label to whichever issue holds that id (or answers HTTP 404
+  when none in the repository does), so the client resolves the number through
+  `resolve_issue_id` first. The two coincide only in the first repository an
+  instance creates.
+- **An unknown `id` (label) answers HTTP 500**, naming nothing. The client
+  confirms every label id against the list first (`_require_labels_exist`),
+  raising `[LABEL_NOT_FOUND]`, so a bad id in the batch attaches nothing.
+
+The route toggles one label per request (the `id` field is a single label) and
+answers a success with **HTTP 200 and `{"ok": true}`**, so it is *not* a
+`redirect_writes` route. `attach` and `detach` are idempotent no-ops when the
+label is already/already-not present. The client sends one request per label.
+
 ## 12. Observed routes outside current client coverage
 
 These routes appeared in the original page investigation but are not called by
@@ -884,7 +974,6 @@ before implementation.
 |---|---|---|---|
 | Update issue title | POST | `/{owner}/{repo}/issues/{issue_number}/title` | Observed, not implemented |
 | Update issue content | POST | `/{owner}/{repo}/issues/{issue_number}/content` | Observed, not implemented |
-| Update issue labels | POST | `/{owner}/{repo}/issues/labels` | Observed, not implemented |
 | Update issue assignee | POST | `/{owner}/{repo}/issues/assignee` | Observed, not implemented |
 | Reorder columns | POST | `/{owner}/{repo}/projects/{project_id}/move` | Payload inferred, not implemented |
 
@@ -916,7 +1005,9 @@ a throwaway instance per version, seeds an admin, a repository, issues and a
 milestone, then exercises the full surface: project create/list/read/rename/
 close/reopen/delete, column create/edit/default/delete, card attach/move/bulk
 move/detach, issue create-onto-board/read/delete, milestone create/edit/close/
-reopen/delete, the composed project/column/milestone readers with paging, and
+reopen/delete, label list/create/edit/delete and attach/detach on an issue
+(the last through the second seeded repository, where the issue id and number
+diverge), the composed project/column/milestone readers with paging, and
 per-issue failure reporting in bulk reads.
 
 Every route, form and DOM anchor in this document behaves identically on majors

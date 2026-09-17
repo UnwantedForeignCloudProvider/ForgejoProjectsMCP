@@ -13,6 +13,8 @@ EXPECTED_TOOLS = {
     "move_card", "delete_issue",
     "list_milestones", "create_milestone", "edit_milestone",
     "close_milestone", "reopen_milestone", "delete_milestone",
+    "list_labels", "create_label", "edit_label", "delete_label",
+    "add_labels_to_issue", "remove_labels_from_issue",
     "bulk_move_cards", "bulk_read_issues",
     "read_card", "read_column", "read_milestone", "read_project",
 }

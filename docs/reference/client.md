@@ -292,7 +292,7 @@ async create_issue(
 async delete_issue(owner, repo, number) -> dict[str, Any]
 ```
 
-`create_issue` posts the issue form and extracts the repository number from Forgejo's JSON redirect when available. `delete_issue` permanently deletes the issue by repository number.
+`create_issue` posts the issue form and extracts the repository number from Forgejo's JSON redirect when available. When `label_ids` are given they are confirmed against the repository's labels first (through `_require_labels_exist`), raising `LABEL_NOT_FOUND` and creating nothing — Forgejo would otherwise silently drop an unknown label id and create the issue without it. `delete_issue` permanently deletes the issue by repository number.
 
 ### Full and bulk reads
 
@@ -376,6 +376,28 @@ Milestone listing validates state and merges separate open/closed pages for `all
 
 Deletion uses the collection route with `id=N`, matching the observed Forgejo behavior; it does not use `/milestones/{id}/delete`. Because that route answers HTTP 200 whether or not anything was deleted, the milestone is resolved against the merged list first and a missing one raises `MILESTONE_NOT_FOUND`.
 
+### Labels
+
+```python
+async list_labels(owner, repo) -> list[dict[str, Any]]
+async create_label(owner, repo, name, color: str = "",
+                   description: str = "") -> dict[str, Any]
+async edit_label(owner, repo, label_id, name: str | None = None,
+                 color: str | None = None,
+                 description: str | None = None) -> dict[str, Any]
+async delete_label(owner, repo, label_id) -> dict[str, Any]
+async add_labels_to_issue(owner, repo, number,
+                          label_ids: list[int]) -> dict[str, Any]
+async remove_labels_from_issue(owner, repo, number,
+                               label_ids: list[int]) -> dict[str, Any]
+```
+
+`list_labels` scrapes the repository labels page: each label's edit button carries its `id`, `name`, `description` and `color` as data attributes, so no separate edit-form read is needed. Every entry is keyed by id and returned id-ordered.
+
+`create_label` refuses a blank name (`INVALID_INPUT`) and validates the color against the profile's `label_color` shape — `#rgb`, `#rrggbb`, or the same without the `#` — because Forgejo answers an unparseable color with a bare HTTP 500. It re-reads the list to recover the new id, raising `CREATE_UNVERIFIED` if none matches. `edit_label` merges against the current values from `list_labels` (so `None` keeps a field and an empty string clears it) and raises `LABEL_NOT_FOUND` for an unknown id before writing. `delete_label` resolves the label first, because the delete route answers HTTP 200 whether or not the label existed.
+
+`add_labels_to_issue` and `remove_labels_from_issue` confirm every id through `_require_labels_exist`, resolve the issue number to its **global id** (the `issues/labels` route keys off the id, not the number), and then post one `attach`/`detach` request per label. Validating first turns Forgejo's bare HTTP 500 for an unknown label into a `LABEL_NOT_FOUND`, and means a bad id in the batch attaches nothing.
+
 ## Private helpers worth knowing
 
 The following methods are implementation details but explain operational behavior:
@@ -390,7 +412,8 @@ The following methods are implementation details but explain operational behavio
 - `_absorb_page` learns the version and CSRF token from any rendered page, and swaps in the profile for a newly detected version;
 - `_route` renders an internal route through the active profile;
 - `_default_config_dir` computes the OS-independent cache root;
-- `_parse_projects_list`, `_parse_board`, `_parse_issue`, and `_parse_milestones` scrape HTML using the active profile's pattern candidates; each also accepts an explicit profile and falls back to `DEFAULT_PROFILE`;
+- `_parse_projects_list`, `_parse_board`, `_parse_issue`, `_parse_milestones`, and `_parse_labels` scrape HTML using the active profile's pattern candidates; each also accepts an explicit profile and falls back to `DEFAULT_PROFILE`;
+- `_require_labels_exist` confirms label ids against `list_labels` before an issue-label write or a labelled `create_issue`, converting Forgejo's silent drop (on `issues/new`) and its bare HTTP 500 (on `issues/labels`) into a single `LABEL_NOT_FOUND`;
 - `_issue_body` resolves an issue's body by its global id, falling back to its number;
 - `_filtered_issue_numbers` uses the repository issues page for server-side state/project/milestone filtering; and
 - `_page` performs the final in-memory slice and returns `(selected, total)`.

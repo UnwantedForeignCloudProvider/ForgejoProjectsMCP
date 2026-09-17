@@ -128,6 +128,35 @@ def test_the_milestones_page_parses_into_a_list(
     assert len(milestones) == len(by_id), "each milestone should be listed once"
 
 
+# ----------------------------------------------------------------- label list
+def test_the_labels_page_parses_into_a_list(
+    live_client, seeded_repo, run_async, writable
+):
+    """A label created through the client reads back out of the real page.
+
+    The offline suite feeds ``_parse_labels`` a hand-written edit button; this
+    confirms that button is still what Forgejo renders (id, name, description
+    and the unquoted colour) on every supported release.
+    """
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    name = unique("parse")
+    lid = run_async(
+        live_client.create_label(owner, repo, name, color="#abcdef", description="d")
+    )["label"]["id"]
+    try:
+        html = fetch(live_client, run_async, "labels", owner=owner, repo=repo)
+        labels = ForgejoClient._parse_labels(html, live_client.profile)
+
+        by_id = {lbl["id"]: lbl for lbl in labels}
+        assert len(labels) == len(by_id), "each label should be listed once"
+        parsed = by_id[lid]
+        assert parsed["name"] == name
+        assert parsed["description"] == "d"
+        assert parsed["color"].lstrip("#").lower() == "abcdef"
+    finally:
+        run_async(live_client.delete_label(owner, repo, lid))
+
+
 # ------------------------------------------------------------------ issue page
 def test_the_issue_page_parses_into_full_content(
     live_client, seeded_repo, forgejo_target, run_async, writable

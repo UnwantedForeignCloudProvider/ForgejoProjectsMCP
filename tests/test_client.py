@@ -1161,6 +1161,197 @@ def _state_handler(prefix, open_id, closed_id):
     return handler
 
 
+# --------------------------------------------------------------------- labels
+# The labels page carries id/name/description/colour on each edit button; create
+# and edit redirect on success, while delete and the issue-label toggle answer
+# 200 with a JSON body (delete answers 200 even for an id that never existed).
+def _label_row(lid, name, desc="", color="#ff0000"):
+    return (
+        f'<a class="edit-label-button" href="#" data-id="{lid}" '
+        f'data-title="{name}" data-num-issues="0" data-description="{desc}" '
+        f"data-color={color}>Edit</a>"
+    )
+
+
+def _labels_handler(labels=((1, "bug"), (2, "enhancement")), issue_id=317):
+    rows = "".join(_label_row(lid, name) for lid, name in labels)
+
+    def handler(method, path, kw):
+        if method == "GET" and path == f"{REPO}/labels":
+            return FakeResponse(status=200, text=f"<ul>{rows}</ul>")
+        # issue page, read by resolve_issue_id (not the POST issues/labels route)
+        if (
+            method == "GET"
+            and path.startswith(f"{REPO}/issues/")
+            and path.count("/") == 4
+        ):
+            return FakeResponse(status=200, text=f'<div data-issue-id="{issue_id}"></div>')
+        if method == "POST" and path in (f"{REPO}/labels/new", f"{REPO}/labels/edit"):
+            return FakeResponse(status=303, headers={"location": f"{REPO}/labels"})
+        if method == "POST" and path == f"{REPO}/labels/delete":
+            return FakeResponse(status=200, json_data={"redirect": f"{REPO}/labels"})
+        if method == "POST" and path == f"{REPO}/issues/labels":
+            return FakeResponse(status=200, json_data={"ok": True})
+        return FakeResponse(status=200, text="")
+    return handler
+
+
+def test_list_labels_parses_the_rows():
+    c = make_client(_labels_handler())
+    got = run(c.list_labels("o", "r"))
+    assert [lbl["id"] for lbl in got] == [1, 2]
+    assert got[0] == {"id": 1, "name": "bug", "description": "", "color": "#ff0000"}
+
+
+def test_label_paths_and_forms():
+    seen = []
+
+    def handler(method, path, kw):
+        seen.append((method, path, dict(kw.get("form") or {})))
+        return _labels_handler()(method, path, kw)
+
+    c = make_client(handler)
+    run(c.create_label("o", "r", "bug", color="#ff0000", description="d"))
+    run(c.edit_label("o", "r", 1, name="bug2"))
+    run(c.delete_label("o", "r", 1))
+    assert ("POST", f"{REPO}/labels/new",
+            {"title": "bug", "description": "d", "color": "#ff0000"}) in seen
+    # edit carries the id in the form and merges the fields left unset
+    assert ("POST", f"{REPO}/labels/edit",
+            {"id": "1", "title": "bug2", "description": "", "color": "#ff0000"}) in seen
+    assert ("POST", f"{REPO}/labels/delete", {"id": "1"}) in seen
+
+
+def test_create_label_reads_back_the_new_label():
+    out = run(make_client(_labels_handler()).create_label("o", "r", "bug"))
+    assert out == {"created": True,
+                   "label": {"id": 1, "name": "bug", "description": "", "color": "#ff0000"}}
+
+
+def test_create_label_rejects_a_blank_name():
+    c = make_client(_labels_handler())
+    with pytest.raises(ForgejoError) as exc:
+        run(c.create_label("o", "r", " "))
+    assert exc.value.code == "INVALID_INPUT"
+    assert find_call(c, "POST", f"{REPO}/labels/new") is None
+
+
+def test_create_label_rejects_a_color_forgejo_would_500_on():
+    c = make_client(_labels_handler())
+    with pytest.raises(ForgejoError) as exc:
+        run(c.create_label("o", "r", "x", color="red"))
+    assert exc.value.code == "INVALID_INPUT"
+    assert find_call(c, "POST", f"{REPO}/labels/new") is None
+
+
+def test_create_label_accepts_the_shorthand_and_hashless_hex():
+    # Unlike a column colour, a label accepts '#abc' and a hashless value.
+    c = make_client(_labels_handler())
+    run(c.create_label("o", "r", "bug", color="#abc"))
+    run(c.create_label("o", "r", "bug", color="abcdef"))
+
+
+def test_edit_label_keeps_the_fields_it_was_not_given():
+    c = make_client(_labels_handler(labels=((1, "bug"),)))
+    run(c.edit_label("o", "r", 1, color="#00ff00"))
+    call = find_call(c, "POST", f"{REPO}/labels/edit")
+    assert call["form"] == {"id": "1", "title": "bug", "description": "", "color": "#00ff00"}
+
+
+def test_edit_label_unknown_id_is_not_found():
+    c = make_client(_labels_handler())
+    with pytest.raises(ForgejoError) as exc:
+        run(c.edit_label("o", "r", 999, name="x"))
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    assert find_call(c, "POST", f"{REPO}/labels/edit") is None
+
+
+def test_delete_label_that_does_not_exist_is_not_reported_as_deleted():
+    """Forgejo answers /labels/delete with 200 whether or not anything was there."""
+    c = make_client(_labels_handler())
+    with pytest.raises(ForgejoError) as exc:
+        run(c.delete_label("o", "r", 999))
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    assert find_call(c, "POST", f"{REPO}/labels/delete") is None
+
+
+def test_add_labels_to_issue_resolves_the_global_id_and_attaches_each():
+    seen = []
+
+    def handler(method, path, kw):
+        seen.append((method, path, dict(kw.get("form") or {})))
+        return _labels_handler(issue_id=317)(method, path, kw)
+
+    c = make_client(handler)
+    out = run(c.add_labels_to_issue("o", "r", 5, [1, 2]))
+    assert out == {"number": 5, "added": [1, 2]}
+    # the issue is addressed by its GLOBAL id, one attach request per label
+    assert ("POST", f"{REPO}/issues/labels",
+            {"issue_ids": "317", "action": "attach", "id": "1"}) in seen
+    assert ("POST", f"{REPO}/issues/labels",
+            {"issue_ids": "317", "action": "attach", "id": "2"}) in seen
+
+
+def test_remove_labels_from_issue_detaches():
+    seen = []
+
+    def handler(method, path, kw):
+        seen.append((method, path, dict(kw.get("form") or {})))
+        return _labels_handler(issue_id=317)(method, path, kw)
+
+    c = make_client(handler)
+    out = run(c.remove_labels_from_issue("o", "r", 5, [2]))
+    assert out == {"number": 5, "removed": [2]}
+    assert ("POST", f"{REPO}/issues/labels",
+            {"issue_ids": "317", "action": "detach", "id": "2"}) in seen
+
+
+def test_toggle_issue_labels_validates_ids_before_touching_anything():
+    """An unknown label answers the toggle route with a bare 500, so it is caught first."""
+    c = make_client(_labels_handler(labels=((1, "bug"),)))
+    with pytest.raises(ForgejoError) as exc:
+        run(c.add_labels_to_issue("o", "r", 5, [1, 999]))
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    assert find_call(c, "POST", f"{REPO}/issues/labels") is None
+    # validation runs before the issue number is even resolved
+    assert find_call(c, "GET", f"{REPO}/issues/5") is None
+
+
+def test_add_labels_to_issue_rejects_an_empty_list():
+    c = make_client(_labels_handler())
+    with pytest.raises(ForgejoError) as exc:
+        run(c.add_labels_to_issue("o", "r", 5, []))
+    assert exc.value.code == "INVALID_INPUT"
+
+
+def _issue_create_with_labels_handler(labels=(1, 2)):
+    rows = "".join(_label_row(lid, f"L{lid}") for lid in labels)
+
+    def handler(method, path, kw):
+        if method == "GET" and path == f"{REPO}/labels":
+            return FakeResponse(status=200, text=f"<ul>{rows}</ul>")
+        if method == "POST" and path == f"{REPO}/issues/new":
+            return FakeResponse(status=200, json_data={"redirect": f"{REPO}/issues/9"})
+        return FakeResponse(status=200, text="")
+    return handler
+
+
+def test_create_issue_sends_valid_label_ids():
+    c = make_client(_issue_create_with_labels_handler(labels=(1, 2)))
+    out = run(c.create_issue("o", "r", "T", label_ids=[1, 2]))
+    assert out["number"] == 9
+    assert find_call(c, "POST", f"{REPO}/issues/new")["form"]["label_ids"] == "1,2"
+
+
+def test_create_issue_rejects_an_unknown_label_id_instead_of_dropping_it():
+    """Forgejo silently drops an unknown label id; the client refuses it first."""
+    c = make_client(_issue_create_with_labels_handler(labels=(1,)))
+    with pytest.raises(ForgejoError) as exc:
+        run(c.create_issue("o", "r", "T", label_ids=[1, 999]))
+    assert exc.value.code == "LABEL_NOT_FOUND"
+    assert find_call(c, "POST", f"{REPO}/issues/new") is None
+
+
 # ------------------------------------------------------------------ paging
 def _paged_handler(path, link, pages):
     """Serve a paginated list page: {page number: [(id, title), ...]}."""

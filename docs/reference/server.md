@@ -58,7 +58,7 @@ clients and the generated CLI see no new contract.
 
 ## Registered tools
 
-The server registers exactly these 31 tools:
+The server registers exactly these 37 tools:
 
 ```text
 forgejo_status, authenticate, list_repositories,
@@ -70,7 +70,9 @@ move_card, delete_issue,
 bulk_move_cards, bulk_read_issues, read_card, read_column,
 read_milestone, read_project,
 list_milestones, create_milestone, edit_milestone,
-close_milestone, reopen_milestone, delete_milestone
+close_milestone, reopen_milestone, delete_milestone,
+list_labels, create_label, edit_label, delete_label,
+add_labels_to_issue, remove_labels_from_issue
 ```
 
 The exact signatures are generated from the functions below and exposed in the MCP input schemas. The [usage guide](../usage.md#tool-reference) gives the consumer-facing argument and result reference.
@@ -178,6 +180,24 @@ async delete_milestone(owner: str, repo: str, milestone_id: int) -> dict
 ```
 
 `list_milestones` wraps results in `{count, milestones}`. Milestone full reads accept a direct project ID filter; they do not perform a project-name lookup.
+
+### Label tools
+
+```python
+async list_labels(owner: str, repo: str) -> dict
+async create_label(owner: str, repo: str, name: str,
+                   color: str = "", description: str = "") -> dict
+async edit_label(owner: str, repo: str, label_id: int,
+                 name: str | None = None, color: str | None = None,
+                 description: str | None = None) -> dict
+async delete_label(owner: str, repo: str, label_id: int) -> dict
+async add_labels_to_issue(owner: str, repo: str, number: int,
+                          label_ids: list[int]) -> dict
+async remove_labels_from_issue(owner: str, repo: str, number: int,
+                               label_ids: list[int]) -> dict
+```
+
+`list_labels` wraps results in `{count, labels}` with `{id, name, color, description}` entries. Forgejo offers no name lookup, so labels are addressed by numeric id resolved from this list. The issue-label tools take the repo issue **number** and validate every label id before writing, reporting an unknown one as `LABEL_NOT_FOUND`.
 
 ## Entry point
 

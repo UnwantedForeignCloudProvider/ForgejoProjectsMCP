@@ -9,8 +9,22 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ## [Unreleased]
 
+## [0.1.0rc4] - 2026-09-17
+
 ### Added
 
+- Label management. `list_labels` reports every label with its `id`, `name`,
+  `color` and `description`; `create_label`, `edit_label` and `delete_label`
+  manage them; and `add_labels_to_issue` / `remove_labels_from_issue` attach and
+  detach labels on an existing issue by its repo number. Forgejo does cover
+  labels under `/api/v1`, but that API rejects the session cookie the client
+  authenticates with, so these use the internal web routes like everything else.
+  Label ids are validated before any issue-label write, so an unknown label is
+  `LABEL_NOT_FOUND` rather than Forgejo's bare HTTP 500; `edit_label` preserves
+  the fields it was not given; and `delete_label` reports `LABEL_NOT_FOUND` for a
+  label that never existed, which Forgejo's route would otherwise answer with a
+  200 that changed nothing. Colors accept `#rgb`, `#rrggbb` or the same without
+  the `#` (an unparseable one is `INVALID_INPUT`, since Forgejo answers it 500).
 - `remove_issues_from_project` accepts an optional `project_id`. It is a guard,
   not a scope: when given, every issue must already be a card on that board or
   the call is refused with `CARD_NOT_FOUND` and nothing is detached. Forgejo
@@ -21,6 +35,11 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ### Changed
 
+- `create_issue` validates `label_ids` before creating the issue and reports an
+  unknown one as `LABEL_NOT_FOUND`, creating nothing. Forgejo silently drops an
+  unknown label id and creates the issue without it, so a caller previously had
+  no way to tell a label had gone missing. The check runs only when labels are
+  supplied, at the cost of one request.
 - `list_repositories` reports `description`, `archived` and `empty` as `null`.
   Forgejo's search route hard-codes them (an empty description, never archived,
   never empty), so every repository came back looking like an unarchived,
@@ -60,7 +79,6 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
   `1`, and the endpoint publishes no total. Behavior is unchanged — the client
   passes both values through deliberately rather than asserting a contract it
   does not own.
-
 - `add_issues_to_project` is documented as the move it is. Forgejo stores one
   project assignment per issue, so attaching an issue that is already on another
   board removes it from that board; the route cannot express membership of two

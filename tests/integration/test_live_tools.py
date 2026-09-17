@@ -29,9 +29,12 @@ def live_tools(live_client, monkeypatch):
     return server.mcp
 
 
-def call(mcp, run_async, name: str, **arguments):
-    """Invoke a tool the way an MCP client does and return its JSON result."""
-    result = run_async(mcp.call_tool(name, arguments))
+def call(mcp, run_async, tool_name: str, /, **arguments):
+    """Invoke a tool the way an MCP client does and return its JSON result.
+
+    ``tool_name`` is positional-only so a tool argument may itself be ``name``.
+    """
+    result = run_async(mcp.call_tool(tool_name, arguments))
     for content in getattr(result, "content", []) or []:
         text = getattr(content, "text", None)
         if text:
@@ -307,3 +310,32 @@ def test_milestone_tools_round_trip(live_tools, seeded_repo, run_async, writable
     finally:
         call(live_tools, run_async, "delete_milestone", owner=owner, repo=repo,
              milestone_id=milestone_id)
+
+
+def test_label_tools_round_trip(live_tools, seeded_repo, run_async, writable):
+    """The label tools cover their own lifecycle through the MCP boundary."""
+    owner, repo = seeded_repo.owner, seeded_repo.name
+    name = unique("MCP label")
+
+    created = call(live_tools, run_async, "create_label", owner=owner, repo=repo,
+                   name=name, color="#ff0000")
+    label_id = int(created["label"]["id"])
+    try:
+        listed = call(live_tools, run_async, "list_labels", owner=owner, repo=repo)
+        assert label_id in [lbl["id"] for lbl in listed["labels"]]
+
+        call(live_tools, run_async, "edit_label", owner=owner, repo=repo,
+             label_id=label_id, name=f"{name} renamed")
+        relisted = call(live_tools, run_async, "list_labels", owner=owner, repo=repo)
+        renamed = next(lbl for lbl in relisted["labels"] if lbl["id"] == label_id)
+        assert renamed["name"] == f"{name} renamed"
+
+        number = seeded_repo.issue_numbers[0]
+        added = call(live_tools, run_async, "add_labels_to_issue", owner=owner,
+                     repo=repo, number=number, label_ids=[label_id])
+        assert added == {"number": number, "added": [label_id]}
+        call(live_tools, run_async, "remove_labels_from_issue", owner=owner,
+             repo=repo, number=number, label_ids=[label_id])
+    finally:
+        call(live_tools, run_async, "delete_label", owner=owner, repo=repo,
+             label_id=label_id)

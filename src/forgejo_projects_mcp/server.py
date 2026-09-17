@@ -336,8 +336,9 @@ async def create_issue(
         milestone_id: Optional milestone to attach. An unknown id is reported as
             not-found and no issue is created.
         label_ids / assignee_ids: Optional numeric ids. An unknown assignee is an
-            error; an unknown label is silently ignored by Forgejo, which creates
-            the issue without it, so read the issue back if labels matter.
+            error. An unknown label id is reported as LABEL_NOT_FOUND and no
+            issue is created — the ids are validated first because Forgejo itself
+            would silently drop an unknown one. Use list_labels to find ids.
     """
     return await _safe(
         client.create_issue(
@@ -370,12 +371,12 @@ async def add_issues_to_project(
 async def remove_issues_from_project(
     owner: str, repo: str, issue_numbers: list[Id], project_id: Id | None = None
 ) -> dict:
-    """Detach issues (by number) from EVERY project board they are on.
+    """Detach issues (by number) from whichever project board currently owns them.
 
     Despite the name, this is not scoped to one project: Forgejo's route clears
-    an issue's project assignment outright, so an issue on two boards is removed
-    from both. There is no project-scoped alternative -- an issue only ever
-    holds one project assignment, so there is no such thing to offer.
+    an issue's single project assignment without naming that project. There is no
+    project-scoped alternative because an issue cannot belong to two project
+    boards at once. The optional project_id below provides a safety guard instead.
     The issues themselves survive.
 
     The returned list describes the resulting state, not what changed: an issue
@@ -609,6 +610,90 @@ async def delete_milestone(owner: str, repo: str, milestone_id: Id) -> dict:
     A milestone that does not exist is an error rather than a reported success.
     """
     return await _safe(client.delete_milestone(owner, repo, milestone_id))
+
+
+# ---------------------------------------------------------------------- labels
+@mcp.tool()
+async def list_labels(owner: str, repo: str) -> dict:
+    """List a repository's labels, each with its id, name, color and description.
+
+    The ids are what create_issue, add_labels_to_issue and the label edit/delete
+    tools take. There is no name-based lookup on Forgejo's side, so resolve a
+    name to an id from this list.
+    """
+    res = await _safe(client.list_labels(owner, repo))
+    if isinstance(res, dict):
+        return res
+    return {"count": len(res), "labels": res}
+
+
+@mcp.tool()
+async def create_label(
+    owner: str, repo: str, name: str,
+    color: str = "", description: str = "",
+) -> dict:
+    """Create a label and return it (read back so the new id is included).
+
+    Args:
+        name: Label name. Must not be blank: Forgejo accepts an empty name and
+            creates a label its own pages cannot address.
+        color: Optional hex color: '#rgb' or '#rrggbb' (the leading '#' may be
+            omitted). Anything else is refused here; Forgejo answers it with
+            HTTP 500. Left to Forgejo's default when empty.
+        description: Optional description.
+    """
+    return await _safe(client.create_label(owner, repo, name, color, description))
+
+
+@mcp.tool()
+async def edit_label(
+    owner: str, repo: str, label_id: Id,
+    name: str | None = None, color: str | None = None,
+    description: str | None = None,
+) -> dict:
+    """Edit a label's name, color and/or description.
+
+    Fields left unset keep their current value; pass an empty string to clear
+    one deliberately. An unknown label_id is reported as LABEL_NOT_FOUND.
+    """
+    return await _safe(
+        client.edit_label(owner, repo, label_id, name, color, description)
+    )
+
+
+@mcp.tool()
+async def delete_label(owner: str, repo: str, label_id: Id) -> dict:
+    """Delete a label (also removing it from every issue that carried it).
+
+    A label that does not exist is an error rather than a reported success.
+    """
+    return await _safe(client.delete_label(owner, repo, label_id))
+
+
+@mcp.tool()
+async def add_labels_to_issue(
+    owner: str, repo: str, number: Id, label_ids: list[Id]
+) -> dict:
+    """Attach labels (by id) to an existing issue (by its repo issue number).
+
+    Every label id is validated first (an unknown one is LABEL_NOT_FOUND, and
+    nothing is attached). Attaching a label the issue already carries is a no-op.
+    Use list_labels to find ids.
+    """
+    return await _safe(client.add_labels_to_issue(owner, repo, number, label_ids))
+
+
+@mcp.tool()
+async def remove_labels_from_issue(
+    owner: str, repo: str, number: Id, label_ids: list[Id]
+) -> dict:
+    """Detach labels (by id) from an existing issue (by its repo issue number).
+
+    Every label id is validated first (an unknown one is LABEL_NOT_FOUND).
+    Detaching a label the issue does not carry is a no-op, so the result lists
+    the labels asked to be removed rather than what changed.
+    """
+    return await _safe(client.remove_labels_from_issue(owner, repo, number, label_ids))
 
 
 def main() -> None:
