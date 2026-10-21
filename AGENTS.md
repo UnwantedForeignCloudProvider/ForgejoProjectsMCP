@@ -71,3 +71,79 @@
   versioning configured in `pyproject.toml`.
 - Preserve the changelog format because release automation extracts notes from
   version headings.
+
+
+# Probe every supported Forgejo version before implementing a fix
+
+When a bug report or review claims that `forgejo-projects-mcp` mishandles some
+Forgejo behavior, the maintainer wants the behavior measured on **every**
+supported release *before* any code is written — not after, and not only on the
+version where the problem was reported. Their stated reasoning is that this is
+what lets the compat layer "apply the fixes where they were actually needed":
+version scoping should follow from evidence, so a `Quirk` is added only where a
+release genuinely differs, and behavior that turns out to be uniform goes into
+the base `Profile` with no quirk at all.
+
+The practical shape of this is a throwaway probe script rather than a test.
+`tests/integration/harness.py` can be imported directly: `ForgejoInstance(v)`
+plus `up()`, `wait_healthy()`, `ensure_admin()` and `seed_repository()` give a
+working instance per version, and probes can then drive `ForgejoClient._request`
+to record raw HTTP statuses and read results back independently. Several
+versions can be probed in parallel, since each gets its own container and port,
+and a container left running from a previous probe is adopted rather than
+rebuilt. Point `CONFIG_DIR`/`STATE_FILE`/`CONFIG_FILE` at a per-version
+directory so parallel probes do not share session state.
+
+The same expectation of thoroughness extends to the documentation that follows
+the fix: the maintainer asks for exhaustivity in
+`docs/forgejo-projects-automation-reference.md`, meaning the measured contract
+itself — which routes signal success how, which inputs the server silently
+accepts, what each release does differently — belongs in that file, including
+the differences that were found and turned out **not** to matter. Recording that
+a behavior was probed across all releases and proved uniform is worth as much as
+recording a difference, because it tells the next reader the question was
+already asked and answered.
+
+
+# Releases must be verified against real Forgejo instances
+
+When cutting a release of `forgejo-projects-mcp`, running the offline gates
+(`ruff`, `ty`, `pytest -q`, `uv build`, `mkdocs build --strict`) is not enough.
+The maintainer requires the dockerized integration suite to be run as part of
+release preparation as well. Noting the gap as a caveat and asking for approval
+anyway is not acceptable — run the tests.
+
+The command starts and tears down throwaway containers itself, and takes roughly
+eleven minutes, so run it in the background rather than under a short timeout:
+
+```bash
+uv run pytest -m integration \
+  --forgejo-version 1.20 --forgejo-version 13 --forgejo-version 14 \
+  --forgejo-version 15 --forgejo-version 16
+```
+
+All five versions are required, for two distinct reasons. **1.20 and 13** cover
+the version-specific behavior in `src/forgejo_projects_mcp/compat.py`: 1.20
+matches all three quirks and 13 only the CSRF one. **14, 15 and 16** are the
+releases still in support, so they are what people actually run, and the
+maintainer expects a release to verify them directly rather than inferring they
+are fine because CI's matrix covers them — CI runs a branch, not the tagged
+commit. Do not narrow the set to just the quirk-covering versions; that omission
+was corrected explicitly.
+
+Two traps to remember: a plain `uv run pytest -q` silently *skips* every
+integration test when no `--forgejo-version` is passed, so a green offline run
+says nothing about live behavior; and pointing `FORGEJO_TEST_URL` at an existing
+instance is not a substitute, because such an instance is treated as
+non-disposable and its write tests skip unless `FORGEJO_TEST_ALLOW_WRITES=1`.
+
+Expect four intentional skips over the five versions, all of them the
+CSRF-rejection-recovery test in `tests/integration/test_live_compat.py`, which
+can only run in the `[9.0, 14.0)` window: it skips on 1.20 (below 9.0, where a
+token-less write is dropped silently with a 303 rather than rejected) and on 14,
+15 and 16 (an `Origin` header is accepted, so nothing rejects). Only 13 runs it.
+A green sweep is `583 passed, 4 skipped` and takes about ten and a half minutes.
+
+This requirement is written into
+`.agents/skills/release-forgejo-projects-mcp/SKILL.md` as section 2.3, but the
+expectation stands regardless of what any particular version of that file says.

@@ -108,7 +108,11 @@ jobs:
       - name: Create draft GitHub Release and upload distributions
         uses: softprops/action-gh-release@v3
         with:
-          files: dist/*
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+          preserve_order: true
+          overwrite_files: false
           body_path: RELEASE_NOTES.md
           generate_release_notes: true    # appends auto notes when the file is empty
           prerelease: ${{ steps.pre.outputs.value }}

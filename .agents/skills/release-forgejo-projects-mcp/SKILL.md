@@ -65,8 +65,10 @@ maintainer rather than assuming.
 GitHub release immutability may remain enabled. The `github-release` job is
 compatible with it: `softprops/action-gh-release` must retain `draft: true`, and
 the final `gh release edit --draft=false` step must run only after the wheel and
-source distribution have been uploaded. If asset upload fails, the draft stays
-mutable and the failed job can be rerun safely.
+source distribution have been uploaded. Assets are uploaded sequentially and
+existing assets are not overwritten, so if an upload fails the draft stays
+mutable and rerunning the failed job preserves any successful upload while it
+adds the missing distribution.
 
 Missing Pages configuration fails the Docs workflow without affecting package
 publishing. Missing PyPI configuration fails the `pypi-publish` job; the

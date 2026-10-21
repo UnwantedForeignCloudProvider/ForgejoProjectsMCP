@@ -1,3 +1,8 @@
+> **Notice:** Forgejo’s Projects API is about to be officially implemented, so
+> a clean MCP implementation will be found elsewhere. See [Forgejo discussion
+> #466](https://codeberg.org/forgejo/discussions/issues/466) for the relevant
+> issue.
+
 # forgejo-projects-mcp
 
 An MCP server that lets an AI agent manage **Forgejo Projects / Kanban boards**,

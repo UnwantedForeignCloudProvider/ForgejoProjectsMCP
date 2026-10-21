@@ -9,6 +9,12 @@ Versions are derived automatically from git tags (`vX.Y.Z`) via
 
 ## [Unreleased]
 
+### Fixed
+
+- Upload GitHub Release distributions sequentially and preserve successful
+  assets when a failed release job is rerun, avoiding the parallel upload race
+  that left `v0.1.0rc4` with only one distribution attached.
+
 ## [0.1.0rc4] - 2026-09-17
 
 ### Added
